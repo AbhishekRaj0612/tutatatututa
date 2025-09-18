@@ -1,15 +1,71 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
-import { Filter, MapPin, TrendingUp, Calendar, ChartBar as BarChart } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert } from 'react-native';
+import { Filter, MapPin, TrendingUp, Calendar, ChartBar as BarChart, Layers, Navigation } from 'lucide-react-native';
+import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
+import { getIssuesWithLocation, getAreas, getWards } from '../../lib/supabase';
+import { useEffect } from 'react';
 
 const { width } = Dimensions.get('window');
 
 export default function HeatmapScreen() {
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('week');
+  const [selectedArea, setSelectedArea] = useState('all');
+  const [selectedWard, setSelectedWard] = useState('all');
+  const [issues, setIssues] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mapRegion, setMapRegion] = useState({
+    latitude: 28.6139, // Default to Delhi
+    longitude: 77.2090,
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+  });
 
+  useEffect(() => {
+    loadData();
+  }, [selectedFilter, selectedArea, selectedWard]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load issues with location data
+      const filters = {};
+      if (selectedFilter !== 'all') {
+        filters.category = selectedFilter;
+      }
+      if (selectedArea !== 'all') {
+        filters.area = selectedArea;
+      }
+      if (selectedWard !== 'all') {
+        filters.ward = selectedWard;
+      }
+      
+      const { data: issuesData, error: issuesError } = await getIssuesWithLocation(filters);
+      if (issuesError) throw issuesError;
+      
+      setIssues(issuesData || []);
+      
+      // Load areas and wards for filtering
+      const [areasResult, wardsResult] = await Promise.all([
+        getAreas(),
+        getWards()
+      ]);
+      
+      if (areasResult.data) setAreas(areasResult.data);
+      if (wardsResult.data) setWards(wardsResult.data);
+      
+    } catch (error) {
+      console.error('Error loading map data:', error);
+      Alert.alert('Error', 'Failed to load map data');
+    } finally {
+      setLoading(false);
+    }
+  };
   const filters = [
-    { id: 'all', label: 'All Issues', color: '#6B7280' },
+    { id: 'all', label: 'All Issues', color: '#6B7280', count: issues.length },
     { id: 'roads', label: 'Roads', color: '#EF4444' },
     { id: 'utilities', label: 'Utilities', color: '#F59E0B' },
     { id: 'environment', label: 'Environment', color: '#10B981' },
@@ -23,20 +79,60 @@ export default function HeatmapScreen() {
     { id: 'year', label: 'This Year' },
   ];
 
-  const hotspots = [
-    { id: 1, location: 'Main Street & 5th Ave', issues: 24, type: 'roads', intensity: 'high' },
-    { id: 2, location: 'Central Park Area', issues: 18, type: 'environment', intensity: 'medium' },
-    { id: 3, location: 'Downtown District', issues: 31, type: 'utilities', intensity: 'high' },
-    { id: 4, location: 'Residential Zone A', issues: 12, type: 'safety', intensity: 'low' },
-    { id: 5, location: 'Industrial Area', issues: 19, type: 'roads', intensity: 'medium' },
-  ];
+  // Calculate hotspots from actual data
+  const calculateHotspots = () => {
+    const locationGroups = {};
+    
+    issues.forEach(issue => {
+      const key = issue.area || issue.location_name || 'Unknown Area';
+      if (!locationGroups[key]) {
+        locationGroups[key] = {
+          location: key,
+          issues: [],
+          count: 0,
+        };
+      }
+      locationGroups[key].issues.push(issue);
+      locationGroups[key].count++;
+    });
+    
+    return Object.values(locationGroups)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map((group, index) => ({
+        id: index + 1,
+        location: group.location,
+        issues: group.count,
+        type: group.issues[0]?.category || 'other',
+        intensity: group.count > 20 ? 'high' : group.count > 10 ? 'medium' : 'low',
+      }));
+  };
 
-  const stats = [
-    { label: 'Total Hotspots', value: '28', trend: '+12%', color: '#EF4444' },
-    { label: 'Avg Issues/Area', value: '15.2', trend: '-5%', color: '#10B981' },
-    { label: 'Most Reported', value: 'Roads', trend: '42%', color: '#F59E0B' },
-    { label: 'Response Time', value: '2.1d', trend: '-15%', color: '#8B5CF6' },
-  ];
+  const hotspots = calculateHotspots();
+
+  // Calculate real stats
+  const calculateStats = () => {
+    const totalIssues = issues.length;
+    const avgIssuesPerArea = areas.length > 0 ? (totalIssues / areas.length).toFixed(1) : '0';
+    
+    // Find most reported category
+    const categoryCount = {};
+    issues.forEach(issue => {
+      categoryCount[issue.category] = (categoryCount[issue.category] || 0) + 1;
+    });
+    const mostReported = Object.keys(categoryCount).reduce((a, b) => 
+      categoryCount[a] > categoryCount[b] ? a : b, 'None'
+    );
+    
+    return [
+      { label: 'Total Issues', value: totalIssues.toString(), trend: '+12%', color: '#EF4444' },
+      { label: 'Avg Issues/Area', value: avgIssuesPerArea, trend: '-5%', color: '#10B981' },
+      { label: 'Most Reported', value: mostReported, trend: '42%', color: '#F59E0B' },
+      { label: 'Active Areas', value: areas.length.toString(), trend: '+8%', color: '#8B5CF6' },
+    ];
+  };
+
+  const stats = calculateStats();
 
   const getIntensityColor = (intensity) => {
     switch (intensity) {
@@ -57,6 +153,21 @@ export default function HeatmapScreen() {
     return typeColors[type] || '#6B7280';
   };
 
+  const getMarkerColor = (category) => {
+    return getTypeColor(category);
+  };
+
+  const onMarkerPress = (issue) => {
+    Alert.alert(
+      issue.title,
+      `${issue.description}\n\nStatus: ${issue.status}\nPriority: ${issue.priority}`,
+      [
+        { text: 'Close', style: 'cancel' },
+        { text: 'View Details', onPress: () => console.log('View details:', issue.id) }
+      ]
+    );
+  };
+
   return (
     <ScrollView style={styles.container}>
       {/* Header */}
@@ -66,30 +177,114 @@ export default function HeatmapScreen() {
       </View>
 
       {/* Filters */}
-      <View style={styles.filtersSection}>
-        <Text style={styles.filterTitle}>Filter by Category</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-          {filters.map((filter) => (
+      <View style={styles.filtersContainer}>
+        <View style={styles.filtersSection}>
+          <Text style={styles.filterTitle}>Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+            {filters.map((filter) => (
+              <TouchableOpacity
+                key={filter.id}
+                style={[
+                  styles.filterButton,
+                  selectedFilter === filter.id && styles.filterButtonActive,
+                  { borderColor: filter.color },
+                ]}
+                onPress={() => setSelectedFilter(filter.id)}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    selectedFilter === filter.id && { color: filter.color },
+                  ]}
+                >
+                  {filter.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
+        <View style={styles.filtersSection}>
+          <Text style={styles.filterTitle}>Area</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
             <TouchableOpacity
-              key={filter.id}
               style={[
                 styles.filterButton,
-                selectedFilter === filter.id && styles.filterButtonActive,
-                { borderColor: filter.color },
+                selectedArea === 'all' && styles.filterButtonActive,
               ]}
-              onPress={() => setSelectedFilter(filter.id)}
+              onPress={() => setSelectedArea('all')}
             >
               <Text
                 style={[
                   styles.filterText,
-                  selectedFilter === filter.id && { color: filter.color },
+                  selectedArea === 'all' && { color: '#1E40AF' },
                 ]}
               >
-                {filter.label}
+                All Areas
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+            {areas.map((area) => (
+              <TouchableOpacity
+                key={area}
+                style={[
+                  styles.filterButton,
+                  selectedArea === area && styles.filterButtonActive,
+                ]}
+                onPress={() => setSelectedArea(area)}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    selectedArea === area && { color: '#1E40AF' },
+                  ]}
+                >
+                  {area}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
+        <View style={styles.filtersSection}>
+          <Text style={styles.filterTitle}>Ward</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                selectedWard === 'all' && styles.filterButtonActive,
+              ]}
+              onPress={() => setSelectedWard('all')}
+            >
+              <Text
+                style={[
+                  styles.filterText,
+                  selectedWard === 'all' && { color: '#1E40AF' },
+                ]}
+              >
+                All Wards
+              </Text>
+            </TouchableOpacity>
+            {wards.map((ward) => (
+              <TouchableOpacity
+                key={ward}
+                style={[
+                  styles.filterButton,
+                  selectedWard === ward && styles.filterButtonActive,
+                ]}
+                onPress={() => setSelectedWard(ward)}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    selectedWard === ward && { color: '#1E40AF' },
+                  ]}
+                >
+                  {ward}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
       </View>
 
       {/* Time Period */}
@@ -133,34 +328,69 @@ export default function HeatmapScreen() {
         </View>
       </View>
 
-      {/* Mock Heatmap Visualization */}
+      {/* Google Maps Integration */}
       <View style={styles.mapSection}>
-        <Text style={styles.sectionTitle}>Heatmap Visualization</Text>
-        <View style={styles.mapContainer}>
-          <View style={styles.mapPlaceholder}>
-            <BarChart size={48} color="#1E40AF" />
-            <Text style={styles.mapText}>Interactive Heatmap</Text>
-            <Text style={styles.mapSubtext}>
-              Tap on areas to view detailed issue information
-            </Text>
+        <View style={styles.mapHeader}>
+          <Text style={styles.sectionTitle}>Issues Map</Text>
+          <View style={styles.mapControls}>
+            <TouchableOpacity style={styles.mapControlButton}>
+              <Layers size={16} color="#1E40AF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.mapControlButton}>
+              <Navigation size={16} color="#1E40AF" />
+            </TouchableOpacity>
           </View>
+        </View>
+        
+        <View style={styles.mapContainer}>
+          <MapView
+            provider={PROVIDER_GOOGLE}
+            style={styles.map}
+            region={mapRegion}
+            onRegionChangeComplete={setMapRegion}
+            showsUserLocation={true}
+            showsMyLocationButton={true}
+            showsCompass={true}
+            showsScale={true}
+          >
+            {issues
+              .filter(issue => issue.latitude && issue.longitude)
+              .map((issue) => (
+                <Marker
+                  key={issue.id}
+                  coordinate={{
+                    latitude: parseFloat(issue.latitude),
+                    longitude: parseFloat(issue.longitude),
+                  }}
+                  pinColor={getMarkerColor(issue.category)}
+                  onPress={() => onMarkerPress(issue)}
+                >
+                  <Callout>
+                    <View style={styles.calloutContainer}>
+                      <Text style={styles.calloutTitle}>{issue.title}</Text>
+                      <Text style={styles.calloutDescription}>
+                        {issue.description.substring(0, 100)}...
+                      </Text>
+                      <View style={styles.calloutMeta}>
+                        <Text style={styles.calloutCategory}>{issue.category}</Text>
+                        <Text style={styles.calloutStatus}>{issue.status}</Text>
+                      </View>
+                    </View>
+                  </Callout>
+                </Marker>
+              ))}
+          </MapView>
           
           {/* Intensity Legend */}
           <View style={styles.legend}>
-            <Text style={styles.legendTitle}>Intensity</Text>
+            <Text style={styles.legendTitle}>Categories</Text>
             <View style={styles.legendItems}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendColor, { backgroundColor: '#10B981' }]} />
-                <Text style={styles.legendText}>Low (1-10)</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendColor, { backgroundColor: '#F59E0B' }]} />
-                <Text style={styles.legendText}>Medium (11-20)</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendColor, { backgroundColor: '#EF4444' }]} />
-                <Text style={styles.legendText}>High (21+)</Text>
-              </View>
+              {filters.slice(1).map((filter) => (
+                <View key={filter.id} style={styles.legendItem}>
+                  <View style={[styles.legendColor, { backgroundColor: filter.color }]} />
+                  <Text style={styles.legendText}>{filter.label}</Text>
+                </View>
+              ))}
             </View>
           </View>
         </View>
@@ -271,6 +501,9 @@ const styles = StyleSheet.create({
   filtersSection: {
     paddingHorizontal: 20,
     paddingVertical: 16,
+    marginBottom: 8,
+  },
+  filtersContainer: {
     backgroundColor: '#FFFFFF',
     marginBottom: 8,
   },
@@ -373,32 +606,65 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     marginBottom: 8,
   },
+  mapHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  mapControls: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mapControlButton: {
+    width: 32,
+    height: 32,
+    backgroundColor: '#F0F9FF',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
   mapContainer: {
     borderRadius: 16,
     overflow: 'hidden',
   },
-  mapPlaceholder: {
-    height: 200,
-    backgroundColor: '#F9FAFB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
+  map: {
+    height: 300,
     borderRadius: 12,
     marginBottom: 16,
   },
-  mapText: {
-    fontSize: 16,
+  calloutContainer: {
+    width: 200,
+    padding: 10,
+  },
+  calloutTitle: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#111827',
-    marginTop: 8,
+    marginBottom: 4,
   },
-  mapSubtext: {
+  calloutDescription: {
     fontSize: 12,
     color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
+    marginBottom: 8,
+  },
+  calloutMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  calloutCategory: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#1E40AF',
+    textTransform: 'capitalize',
+  },
+  calloutStatus: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#10B981',
+    textTransform: 'capitalize',
   },
   legend: {
     backgroundColor: '#F9FAFB',
@@ -413,7 +679,8 @@ const styles = StyleSheet.create({
   },
   legendItems: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
   },
   legendItem: {
     flexDirection: 'row',

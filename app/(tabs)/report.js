@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
-import { Camera, MapPin, Upload, Send, X } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Image, Modal } from 'react-native';
+import { Camera, MapPin, Upload, Send, X, Navigation } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { createIssue, getCurrentUser } from '../../lib/supabase';
 import { uploadMultipleImages } from '../../lib/cloudinary';
 import { useTranslation } from 'react-i18next';
@@ -12,11 +14,24 @@ export default function ReportScreen() {
     title: '',
     description: '',
     category: '',
-    location: '',
+    locationName: '',
+    address: '',
+    area: '',
+    ward: '',
     priority: 'medium',
+    latitude: null,
+    longitude: null,
   });
   const [selectedImages, setSelectedImages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [mapRegion, setMapRegion] = useState({
+    latitude: 28.6139, // Default to Delhi
+    longitude: 77.2090,
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+  });
+  const [selectedLocation, setSelectedLocation] = useState(null);
 
   const categories = [
     { id: 'roads', label: t('category.roads'), color: '#EF4444' },
@@ -61,9 +76,110 @@ export default function ReportScreen() {
   };
 
   const getCurrentLocation = () => {
-    // Mock function - in real app, use expo-location
-    setFormData({ ...formData, location: 'Current Location (Mock)' });
-    Alert.alert(t('common.success'), 'Location captured successfully!');
+    Alert.alert(
+      'Get Location',
+      'Choose how to set the location:',
+      [
+        { text: 'Use Current Location', onPress: useCurrentLocation },
+        { text: 'Pick on Map', onPress: () => setShowLocationPicker(true) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const useCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to get current location');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = location.coords;
+      
+      // Reverse geocoding to get address
+      const reverseGeocode = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude,
+      });
+      
+      if (reverseGeocode.length > 0) {
+        const address = reverseGeocode[0];
+        setFormData({
+          ...formData,
+          latitude,
+          longitude,
+          locationName: `${address.street || ''} ${address.name || ''}`.trim(),
+          address: `${address.street || ''}, ${address.city || ''}, ${address.region || ''}`,
+          area: address.district || address.subregion || '',
+          ward: address.city || '',
+        });
+        Alert.alert(t('common.success'), 'Current location captured successfully!');
+      }
+    } catch (error) {
+      console.error('Error getting location:', error);
+      Alert.alert('Error', 'Failed to get current location');
+    }
+  };
+
+  const onMapPress = (event) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSelectedLocation({ latitude, longitude });
+    setMapRegion({
+      ...mapRegion,
+      latitude,
+      longitude,
+    });
+  };
+
+  const confirmLocation = async () => {
+    if (!selectedLocation) {
+      Alert.alert('Error', 'Please select a location on the map');
+      return;
+    }
+
+    try {
+      // Reverse geocoding to get address
+      const reverseGeocode = await Location.reverseGeocodeAsync(selectedLocation);
+      
+      if (reverseGeocode.length > 0) {
+        const address = reverseGeocode[0];
+        setFormData({
+          ...formData,
+          latitude: selectedLocation.latitude,
+          longitude: selectedLocation.longitude,
+          locationName: `${address.street || ''} ${address.name || ''}`.trim(),
+          address: `${address.street || ''}, ${address.city || ''}, ${address.region || ''}`,
+          area: address.district || address.subregion || '',
+          ward: address.city || '',
+        });
+      } else {
+        setFormData({
+          ...formData,
+          latitude: selectedLocation.latitude,
+          longitude: selectedLocation.longitude,
+          locationName: 'Selected Location',
+          address: `${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`,
+        });
+      }
+      
+      setShowLocationPicker(false);
+      setSelectedLocation(null);
+      Alert.alert(t('common.success'), 'Location selected successfully!');
+    } catch (error) {
+      console.error('Error getting address:', error);
+      setFormData({
+        ...formData,
+        latitude: selectedLocation.latitude,
+        longitude: selectedLocation.longitude,
+        locationName: 'Selected Location',
+        address: `${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`,
+      });
+      setShowLocationPicker(false);
+      setSelectedLocation(null);
+      Alert.alert(t('common.success'), 'Location selected successfully!');
+    }
   };
 
   const submitReport = async () => {
@@ -105,7 +221,12 @@ export default function ReportScreen() {
         description: formData.description,
         category: formData.category,
         priority: formData.priority,
-        location: formData.location,
+        location_name: formData.locationName,
+        address: formData.address,
+        area: formData.area,
+        ward: formData.ward,
+        latitude: formData.latitude,
+        longitude: formData.longitude,
         images: imageUrls,
         status: 'pending',
       };
@@ -123,8 +244,13 @@ export default function ReportScreen() {
               title: '',
               description: '',
               category: '',
-              location: '',
+              locationName: '',
+              address: '',
+              area: '',
+              ward: '',
               priority: 'medium',
+              latitude: null,
+              longitude: null,
             });
             setSelectedImages([]);
           }
@@ -230,14 +356,36 @@ export default function ReportScreen() {
           <View style={styles.locationContainer}>
             <TextInput
               style={[styles.input, styles.locationInput]}
-              placeholder="Enter location or use current location"
-              value={formData.location}
-              onChangeText={(text) => setFormData({ ...formData, location: text })}
+              placeholder="Location will appear here"
+              value={formData.locationName}
+              onChangeText={(text) => setFormData({ ...formData, locationName: text })}
             />
             <TouchableOpacity style={styles.locationButton} onPress={getCurrentLocation}>
-              <MapPin size={20} color="#1E40AF" />
+              <Navigation size={20} color="#1E40AF" />
             </TouchableOpacity>
           </View>
+          
+          {formData.address && (
+            <View style={styles.addressContainer}>
+              <MapPin size={16} color="#6B7280" />
+              <Text style={styles.addressText}>{formData.address}</Text>
+            </View>
+          )}
+          
+          {(formData.area || formData.ward) && (
+            <View style={styles.locationMeta}>
+              {formData.area && (
+                <View style={styles.locationTag}>
+                  <Text style={styles.locationTagText}>Area: {formData.area}</Text>
+                </View>
+              )}
+              {formData.ward && (
+                <View style={styles.locationTag}>
+                  <Text style={styles.locationTagText}>Ward: {formData.ward}</Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Media Upload */}
@@ -283,6 +431,57 @@ export default function ReportScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Location Picker Modal */}
+      <Modal
+        visible={showLocationPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => {
+                setShowLocationPicker(false);
+                setSelectedLocation(null);
+              }}
+            >
+              <X size={24} color="#6B7280" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Select Location</Text>
+            <TouchableOpacity
+              style={styles.modalConfirmButton}
+              onPress={confirmLocation}
+            >
+              <Text style={styles.modalConfirmText}>Confirm</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <MapView
+            provider={PROVIDER_GOOGLE}
+            style={styles.modalMap}
+            region={mapRegion}
+            onRegionChangeComplete={setMapRegion}
+            onPress={onMapPress}
+            showsUserLocation={true}
+            showsMyLocationButton={true}
+          >
+            {selectedLocation && (
+              <Marker
+                coordinate={selectedLocation}
+                pinColor="#1E40AF"
+              />
+            )}
+          </MapView>
+          
+          <View style={styles.mapInstructions}>
+            <Text style={styles.instructionsText}>
+              Tap on the map to select the issue location
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -383,6 +582,37 @@ const styles = StyleSheet.create({
   locationInput: {
     flex: 1,
   },
+  addressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F0F9FF',
+    borderRadius: 8,
+    gap: 8,
+  },
+  addressText: {
+    fontSize: 12,
+    color: '#1E40AF',
+    flex: 1,
+  },
+  locationMeta: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  locationTag: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  locationTagText: {
+    fontSize: 10,
+    color: '#0369A1',
+    fontWeight: '500',
+  },
   locationButton: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -459,5 +689,54 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  modalConfirmButton: {
+    backgroundColor: '#1E40AF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  modalConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalMap: {
+    flex: 1,
+  },
+  mapInstructions: {
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  instructionsText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
   },
 });
