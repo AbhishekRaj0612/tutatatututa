@@ -37,8 +37,8 @@ export default function ContactSection() {
     { id: 'Public Safety', label: 'Public Safety' },
   ];
 
-  const filteredOfficials = selectedDepartment === 'all' 
-    ? officials 
+  const filteredOfficials = selectedDepartment === 'all'
+    ? officials
     : officials.filter(official => official.department === selectedDepartment);
 
   const handleCall = (phoneNumber) => {
@@ -278,12 +278,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
+    marginVertical: 10, // spacing between multiple cards
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
   },
+
   officialHeader: {
     marginBottom: 16,
   },

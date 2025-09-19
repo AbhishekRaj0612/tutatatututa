@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { MessageSquare } from 'lucide-react-native';
+import { MessageSquare, Send, CircleCheck as CheckCircle } from 'lucide-react-native';
 import FeedbackForm from '../../components/FeedbackForm';
+import FeedbackList from '../../components/FeedbackList';
 import LanguageSelector from '../../components/LanguageSelector';
 import { useTranslation } from 'react-i18next';
 
 export default function FeedbackScreen() {
   const { t } = useTranslation();
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [activeTab, setActiveTab] = useState('submit');
+
+  const tabs = [
+    { id: 'submit', label: 'Submit Feedback', icon: Send },
+    { id: 'history', label: 'My Feedback', icon: CheckCircle },
+  ];
 
   return (
     <View style={styles.container}>
@@ -19,34 +26,70 @@ export default function FeedbackScreen() {
         <LanguageSelector />
       </View>
 
-      <View style={styles.content}>
-        <View style={styles.feedbackCard}>
-          <MessageSquare size={48} color="#1E40AF" />
-          <Text style={styles.cardTitle}>Share Your Feedback</Text>
-          <Text style={styles.cardDescription}>
-            Have suggestions, complaints, or compliments? We'd love to hear from you.
-            Your feedback helps us improve our community services.
-          </Text>
-          
-          <TouchableOpacity
-            style={styles.feedbackButton}
-            onPress={() => setShowFeedbackForm(true)}
-          >
-            <MessageSquare size={20} color="#FFFFFF" />
-            <Text style={styles.feedbackButtonText}>Submit Feedback</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.infoSection}>
-          <Text style={styles.infoTitle}>How We Use Your Feedback</Text>
-          <View style={styles.infoList}>
-            <Text style={styles.infoItem}>• Improve our services and processes</Text>
-            <Text style={styles.infoItem}>• Address community concerns quickly</Text>
-            <Text style={styles.infoItem}>• Recognize outstanding service</Text>
-            <Text style={styles.infoItem}>• Plan future improvements</Text>
-          </View>
-        </View>
+      {/* Tab Navigation */}
+      <View style={styles.tabsContainer}>
+        {tabs.map((tab) => {
+          const IconComponent = tab.icon;
+          return (
+            <TouchableOpacity
+              key={tab.id}
+              style={[
+                styles.tab,
+                activeTab === tab.id && styles.tabActive,
+              ]}
+              onPress={() => setActiveTab(tab.id)}
+            >
+              <IconComponent 
+                size={16} 
+                color={activeTab === tab.id ? '#1E40AF' : '#6B7280'} 
+              />
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === tab.id && styles.tabTextActive,
+                ]}
+              >
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
+
+      <View style={styles.content}>
+        {activeTab === 'submit' ? (
+          <>
+            <View style={styles.feedbackCard}>
+              <MessageSquare size={48} color="#1E40AF" />
+              <Text style={styles.cardTitle}>Share Your Feedback</Text>
+              <Text style={styles.cardDescription}>
+                Have suggestions, complaints, or compliments? We'd love to hear from you.
+                Your feedback helps us improve our community services.
+              </Text>
+              
+              <TouchableOpacity
+                style={styles.feedbackButton}
+                onPress={() => setShowFeedbackForm(true)}
+              >
+                <MessageSquare size={20} color="#FFFFFF" />
+                <Text style={styles.feedbackButtonText}>Submit Feedback</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.infoSection}>
+              <Text style={styles.infoTitle}>How We Use Your Feedback</Text>
+              <View style={styles.infoList}>
+                <Text style={styles.infoItem}>• Improve our services and processes</Text>
+                <Text style={styles.infoItem}>• Address community concerns quickly</Text>
+                <Text style={styles.infoItem}>• Recognize outstanding service</Text>
+                <Text style={styles.infoItem}>• Plan future improvements</Text>
+              </View>
+            </View>
+          </>
+        ) : (
+          <FeedbackList />
+        )}
+          </View>
 
       <FeedbackForm
         visible={showFeedbackForm}
@@ -79,6 +122,41 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#6B7280',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
+  },
+  tabActive: {
+    backgroundColor: '#F0F9FF',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  tabTextActive: {
+    color: '#1E40AF',
+    fontWeight: '600',
   },
   content: {
     flex: 1,

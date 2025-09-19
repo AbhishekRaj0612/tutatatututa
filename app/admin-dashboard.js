@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChartBar as BarChart3, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, MapPin, Filter, Search, Settings, LogOut } from 'lucide-react-native';
+import { ChartBar as BarChart3, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, MapPin, Filter, Search, Settings, LogOut, MessageSquare } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import AdminFeedbackSection from '../components/AdminFeedbackSection';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [selectedFilter, setSelectedFilter] = useState('all');
+  const [selectedSection, setSelectedSection] = useState('overview');
   const [adminName, setAdminName] = useState('Admin');
 
   useEffect(() => {
@@ -39,6 +41,11 @@ export default function AdminDashboard() {
     activeUsers: 2341,
     responseTime: '1.8 days',
   };
+
+  const sections = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'feedback', label: 'Feedback', icon: MessageSquare },
+  ];
 
   const filters = [
     { id: 'all', label: 'All Issues', count: 1234 },
@@ -167,6 +174,34 @@ export default function AdminDashboard() {
           <Text style={styles.adminName}>Welcome back, {adminName}</Text>
         </View>
         <View style={styles.headerActions}>
+          <View style={styles.sectionTabs}>
+            {sections.map((section) => {
+              const IconComponent = section.icon;
+              return (
+                <TouchableOpacity
+                  key={section.id}
+                  style={[
+                    styles.sectionTab,
+                    selectedSection === section.id && styles.sectionTabActive,
+                  ]}
+                  onPress={() => setSelectedSection(section.id)}
+                >
+                  <IconComponent 
+                    size={16} 
+                    color={selectedSection === section.id ? '#1E40AF' : '#6B7280'} 
+                  />
+                  <Text
+                    style={[
+                      styles.sectionTabText,
+                      selectedSection === section.id && styles.sectionTabTextActive,
+                    ]}
+                  >
+                    {section.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <TouchableOpacity style={styles.headerButton}>
             <Search size={20} color="#1E40AF" />
           </TouchableOpacity>
@@ -179,189 +214,195 @@ export default function AdminDashboard() {
         </View>
       </View>
 
-      {/* Stats Overview */}
-      <View style={styles.statsSection}>
-        <Text style={styles.sectionTitle}>Overview</Text>
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <BarChart3 size={20} color="#1E40AF" />
-              <Text style={styles.statNumber}>{stats.totalIssues}</Text>
-            </View>
-            <Text style={styles.statLabel}>Total Issues</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Clock size={20} color="#F59E0B" />
-              <Text style={styles.statNumber}>{stats.pendingIssues}</Text>
-            </View>
-            <Text style={styles.statLabel}>Pending</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <AlertTriangle size={20} color="#1E40AF" />
-              <Text style={styles.statNumber}>{stats.inProgressIssues}</Text>
-            </View>
-            <Text style={styles.statLabel}>In Progress</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <CheckCircle size={20} color="#10B981" />
-              <Text style={styles.statNumber}>{stats.resolvedIssues}</Text>
-            </View>
-            <Text style={styles.statLabel}>Resolved</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Users size={20} color="#8B5CF6" />
-              <Text style={styles.statNumber}>{stats.activeUsers}</Text>
-            </View>
-            <Text style={styles.statLabel}>Active Users</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Clock size={20} color="#10B981" />
-              <Text style={styles.statNumber}>{stats.responseTime}</Text>
-            </View>
-            <Text style={styles.statLabel}>Avg Response</Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Filters */}
-      <View style={styles.filtersSection}>
-        <View style={styles.filtersHeader}>
-          <Text style={styles.sectionTitle}>Issue Management</Text>
-          <TouchableOpacity style={styles.filterButton}>
-            <Filter size={16} color="#1E40AF" />
-            <Text style={styles.filterButtonText}>Filter</Text>
-          </TouchableOpacity>
-        </View>
-        
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.filtersList}>
-            {filters.map((filter) => (
-              <TouchableOpacity
-                key={filter.id}
-                style={[
-                  styles.filterChip,
-                  selectedFilter === filter.id && styles.filterChipActive,
-                ]}
-                onPress={() => setSelectedFilter(filter.id)}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    selectedFilter === filter.id && styles.filterChipTextActive,
-                  ]}
-                >
-                  {filter.label}
-                </Text>
-                <View style={styles.filterChipBadge}>
-                  <Text style={styles.filterChipBadgeText}>{filter.count}</Text>
+      {selectedSection === 'overview' ? (
+        <>
+          {/* Stats Overview */}
+          <View style={styles.statsSection}>
+            <Text style={styles.sectionTitle}>Overview</Text>
+            <View style={styles.statsGrid}>
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <BarChart3 size={20} color="#1E40AF" />
+                  <Text style={styles.statNumber}>{stats.totalIssues}</Text>
                 </View>
+                <Text style={styles.statLabel}>Total Issues</Text>
+              </View>
+              
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <Clock size={20} color="#F59E0B" />
+                  <Text style={styles.statNumber}>{stats.pendingIssues}</Text>
+                </View>
+                <Text style={styles.statLabel}>Pending</Text>
+              </View>
+              
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <AlertTriangle size={20} color="#1E40AF" />
+                  <Text style={styles.statNumber}>{stats.inProgressIssues}</Text>
+                </View>
+                <Text style={styles.statLabel}>In Progress</Text>
+              </View>
+              
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <CheckCircle size={20} color="#10B981" />
+                  <Text style={styles.statNumber}>{stats.resolvedIssues}</Text>
+                </View>
+                <Text style={styles.statLabel}>Resolved</Text>
+              </View>
+              
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <Users size={20} color="#8B5CF6" />
+                  <Text style={styles.statNumber}>{stats.activeUsers}</Text>
+                </View>
+                <Text style={styles.statLabel}>Active Users</Text>
+              </View>
+              
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <Clock size={20} color="#10B981" />
+                  <Text style={styles.statNumber}>{stats.responseTime}</Text>
+                </View>
+                <Text style={styles.statLabel}>Avg Response</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Filters */}
+          <View style={styles.filtersSection}>
+            <View style={styles.filtersHeader}>
+              <Text style={styles.sectionTitle}>Issue Management</Text>
+              <TouchableOpacity style={styles.filterButton}>
+                <Filter size={16} color="#1E40AF" />
+                <Text style={styles.filterButtonText}>Filter</Text>
               </TouchableOpacity>
-            ))}
+            </View>
+            
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.filtersList}>
+                {filters.map((filter) => (
+                  <TouchableOpacity
+                    key={filter.id}
+                    style={[
+                      styles.filterChip,
+                      selectedFilter === filter.id && styles.filterChipActive,
+                    ]}
+                    onPress={() => setSelectedFilter(filter.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        selectedFilter === filter.id && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {filter.label}
+                    </Text>
+                    <View style={styles.filterChipBadge}>
+                      <Text style={styles.filterChipBadgeText}>{filter.count}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
           </View>
-        </ScrollView>
-      </View>
 
-      {/* Issues List */}
-      <View style={styles.issuesSection}>
-        <Text style={styles.sectionTitle}>Recent Issues</Text>
-        <View style={styles.issuesList}>
-          {recentIssues.map((issue) => (
-            <TouchableOpacity key={issue.id} style={styles.issueCard}>
-              {/* Issue Header */}
-              <View style={styles.issueHeader}>
-                <View style={styles.issueStatus}>
-                  {getStatusIcon(issue.status)}
-                  <Text style={[styles.statusText, { color: getStatusColor(issue.status) }]}>
-                    {issue.status.replace('-', ' ').toUpperCase()}
-                  </Text>
-                </View>
-                <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(issue.priority) }]}>
-                  <Text style={styles.priorityText}>{issue.priority.toUpperCase()}</Text>
-                </View>
-              </View>
+          {/* Issues List */}
+          <View style={styles.issuesSection}>
+            <Text style={styles.sectionTitle}>Recent Issues</Text>
+            <View style={styles.issuesList}>
+              {recentIssues.map((issue) => (
+                <TouchableOpacity key={issue.id} style={styles.issueCard}>
+                  {/* Issue Header */}
+                  <View style={styles.issueHeader}>
+                    <View style={styles.issueStatus}>
+                      {getStatusIcon(issue.status)}
+                      <Text style={[styles.statusText, { color: getStatusColor(issue.status) }]}>
+                        {issue.status.replace('-', ' ').toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(issue.priority) }]}>
+                      <Text style={styles.priorityText}>{issue.priority.toUpperCase()}</Text>
+                    </View>
+                  </View>
 
-              {/* Issue Title */}
-              <Text style={styles.issueTitle}>{issue.title}</Text>
+                  {/* Issue Title */}
+                  <Text style={styles.issueTitle}>{issue.title}</Text>
 
-              {/* Issue Details */}
-              <View style={styles.issueDetails}>
-                <View style={styles.issueDetail}>
-                  <MapPin size={14} color="#6B7280" />
-                  <Text style={styles.issueDetailText}>{issue.location}</Text>
-                </View>
-                <Text style={styles.issueReporter}>Reported by {issue.reportedBy}</Text>
-                <Text style={styles.issueTime}>{issue.reportedAt}</Text>
-              </View>
+                  {/* Issue Details */}
+                  <View style={styles.issueDetails}>
+                    <View style={styles.issueDetail}>
+                      <MapPin size={14} color="#6B7280" />
+                      <Text style={styles.issueDetailText}>{issue.location}</Text>
+                    </View>
+                    <Text style={styles.issueReporter}>Reported by {issue.reportedBy}</Text>
+                    <Text style={styles.issueTime}>{issue.reportedAt}</Text>
+                  </View>
 
-              {/* Assignment Info */}
-              {issue.assignedTo ? (
-                <View style={styles.assignmentInfo}>
-                  <Text style={styles.assignmentText}>Assigned to: {issue.assignedTo}</Text>
-                </View>
-              ) : (
-                <View style={styles.unassignedInfo}>
-                  <Text style={styles.unassignedText}>⚠️ Not assigned</Text>
-                </View>
-              )}
+                  {/* Assignment Info */}
+                  {issue.assignedTo ? (
+                    <View style={styles.assignmentInfo}>
+                      <Text style={styles.assignmentText}>Assigned to: {issue.assignedTo}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.unassignedInfo}>
+                      <Text style={styles.unassignedText}>⚠️ Not assigned</Text>
+                    </View>
+                  )}
 
-              {/* Action Buttons */}
-              <View style={styles.issueActions}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.assignButton]}
-                  onPress={() => handleAssignIssue(issue.id)}
-                >
-                  <Text style={styles.assignButtonText}>Assign</Text>
+                  {/* Action Buttons */}
+                  <View style={styles.issueActions}>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.assignButton]}
+                      onPress={() => handleAssignIssue(issue.id)}
+                    >
+                      <Text style={styles.assignButtonText}>Assign</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.statusButton]}
+                      onPress={() => handleUpdateStatus(issue.id)}
+                    >
+                      <Text style={styles.statusButtonText}>Update Status</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionButton, styles.detailsButton]}>
+                      <Text style={styles.detailsButtonText}>View Details</Text>
+                    </TouchableOpacity>
+                  </View>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.statusButton]}
-                  onPress={() => handleUpdateStatus(issue.id)}
-                >
-                  <Text style={styles.statusButtonText}>Update Status</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionButton, styles.detailsButton]}>
-                  <Text style={styles.detailsButtonText}>View Details</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+              ))}
+            </View>
+          </View>
 
-      {/* Quick Actions */}
-      <View style={styles.quickActionsSection}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsList}>
-          <TouchableOpacity style={styles.quickActionButton}>
-            <BarChart3 size={24} color="#1E40AF" />
-            <Text style={styles.quickActionText}>Generate Report</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.quickActionButton}>
-            <Users size={24} color="#10B981" />
-            <Text style={styles.quickActionText}>Manage Users</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.quickActionButton}>
-            <Settings size={24} color="#F59E0B" />
-            <Text style={styles.quickActionText}>System Settings</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.quickActionButton}>
-            <AlertTriangle size={24} color="#EF4444" />
-            <Text style={styles.quickActionText}>Emergency Issues</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+          {/* Quick Actions */}
+          <View style={styles.quickActionsSection}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsList}>
+              <TouchableOpacity style={styles.quickActionButton}>
+                <BarChart3 size={24} color="#1E40AF" />
+                <Text style={styles.quickActionText}>Generate Report</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.quickActionButton}>
+                <Users size={24} color="#10B981" />
+                <Text style={styles.quickActionText}>Manage Users</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.quickActionButton}>
+                <Settings size={24} color="#F59E0B" />
+                <Text style={styles.quickActionText}>System Settings</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.quickActionButton}>
+                <AlertTriangle size={24} color="#EF4444" />
+                <Text style={styles.quickActionText}>Emergency Issues</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </>
+      ) : (
+        <AdminFeedbackSection />
+      )}
     </ScrollView>
   );
 }
@@ -396,8 +437,41 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerActions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 8,
+    alignItems: 'flex-end',
+  },
+  sectionTabs: {
+    flexDirection: 'row',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 2,
+    gap: 2,
+  },
+  sectionTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  sectionTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sectionTabText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  sectionTabTextActive: {
+    color: '#1E40AF',
+    fontWeight: '600',
   },
   headerButton: {
     width: 36,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
-import { Bell, MapPin, Users, TrendingUp, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle } from 'lucide-react-native';
-import { getCurrentUser, getUserProfile, getIssues } from '../../lib/supabase';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, RefreshControl, Alert } from 'react-native';
+import { Bell, MapPin, Users, TrendingUp, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Trophy, MessageSquare, Star, Calendar, Activity } from 'lucide-react-native';
+import { getCurrentUser, getUserProfile, getIssues, getPosts, getTenders, getUserBids, getUserNotifications } from '../../lib/supabase';
 import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
@@ -10,14 +10,22 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notifications, setNotifications] = useState([]);
   const [stats, setStats] = useState({
-    totalIssues: 1234,
-    resolvedIssues: 856,
-    activeUsers: 2341,
-    responseTime: '2.3 days',
+    totalIssues: 0,
+    resolvedIssues: 0,
+    pendingIssues: 0,
+    myIssues: 0,
+    communityPosts: 0,
+    activeTenders: 0,
+    myBids: 0,
+    userRank: 0,
+    responseTime: '0 days',
   });
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [quickStats, setQuickStats] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -39,246 +47,685 @@ export default function HomeScreen() {
         if (profileError) throw profileError;
         setProfile(profileData);
         
-        // Get issues for stats
-        const { data: issuesData, error: issuesError } = await getIssues();
-        if (issuesError) throw issuesError;
-        
-        if (issuesData) {
-          setIssues(issuesData);
-          
-          // Calculate real stats
-          const totalIssues = issuesData.length;
-          const resolvedIssues = issuesData.filter(issue => issue.status === 'resolved').length;
-          const inProgressIssues = issuesData.filter(issue => issue.status === 'in_progress').length;
-          
-          setStats({
-            totalIssues,
-            resolvedIssues,
-            activeUsers: 2341, // This would come from a separate query
-            responseTime: '2.3 days',
-          });
-        }
+        // Load all data in parallel
+        await Promise.all([
+          loadIssuesData(currentUser.id),
+          loadCommunityData(),
+          loadTendersData(currentUser.id, profileData?.user_type),
+          loadNotifications(currentUser.id),
+          loadRecentActivity(currentUser.id),
+        ]);
       }
     } catch (error) {
       console.error('Error loading data:', error);
+      Alert.alert('Error', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
-  const quickActions = [
-    { id: 1, title: 'Report Issue', icon: MapPin, color: '#EF4444', screen: 'report' },
-    { id: 2, title: 'View Heatmap', icon: TrendingUp, color: '#F59E0B', screen: 'heatmap' },
-    { id: 3, title: 'Leaderboard', icon: Users, color: '#10B981', screen: 'leaderboard' },
-    { id: 4, title: 'Community', icon: Users, color: '#8B5CF6', screen: 'community' },
+  const loadIssuesData = async (userId) => {
+    try {
+      const { data: allIssues, error } = await getIssues();
+      if (error) throw error;
+
+      const totalIssues = allIssues?.length || 0;
+      const resolvedIssues = allIssues?.filter(issue => issue.status === 'resolved').length || 0;
+      const pendingIssues = allIssues?.filter(issue => issue.status === 'pending').length || 0;
+      const myIssues = allIssues?.filter(issue => issue.user_id === userId).length || 0;
+
+      // Calculate average response time
+      const resolvedWithDates = allIssues?.filter(issue => 
+        issue.status === 'resolved' && issue.resolved_at && issue.created_at
+      ) || [];
+      
+      let avgResponseTime = '0 days';
+      if (resolvedWithDates.length > 0) {
+        const totalDays = resolvedWithDates.reduce((sum, issue) => {
+          const created = new Date(issue.created_at);
+          const resolved = new Date(issue.resolved_at);
+          const days = Math.ceil((resolved - created) / (1000 * 60 * 60 * 24));
+          return sum + days;
+        }, 0);
+        avgResponseTime = `${Math.round(totalDays / resolvedWithDates.length)} days`;
+      }
+
+      setStats(prev => ({
+        ...prev,
+        totalIssues,
+        resolvedIssues,
+        pendingIssues,
+        myIssues,
+        responseTime: avgResponseTime,
+      }));
+
+      // Set recent activity from issues
+      const recentIssues = allIssues?.slice(0, 5).map(issue => ({
+        id: issue.id,
+        type: 'issue',
+        title: issue.title,
+        status: issue.status,
+        time: getTimeAgo(issue.created_at),
+        icon: getIssueIcon(issue.category),
+        color: getStatusColor(issue.status),
+      })) || [];
+
+      setRecentActivity(prev => [...prev, ...recentIssues]);
+    } catch (error) {
+      console.error('Error loading issues data:', error);
+    }
+  };
+
+  const loadCommunityData = async () => {
+    try {
+      const { data: posts, error } = await getPosts();
+      if (error) throw error;
+
+      const communityPosts = posts?.length || 0;
+      setStats(prev => ({ ...prev, communityPosts }));
+
+      // Add recent posts to activity
+      const recentPosts = posts?.slice(0, 3).map(post => ({
+        id: post.id,
+        type: 'post',
+        title: post.content.substring(0, 50) + '...',
+        status: 'active',
+        time: getTimeAgo(post.created_at),
+        icon: '💬',
+        color: '#8B5CF6',
+      })) || [];
+
+      setRecentActivity(prev => [...prev, ...recentPosts]);
+    } catch (error) {
+      console.error('Error loading community data:', error);
+    }
+  };
+
+  const loadTendersData = async (userId, userType) => {
+    try {
+      const { data: tenders, error } = await getTenders();
+      if (error) throw error;
+
+      const activeTenders = tenders?.filter(tender => tender.status === 'available').length || 0;
+      setStats(prev => ({ ...prev, activeTenders }));
+
+      if (userType === 'tender') {
+        const { data: bids, error: bidsError } = await getUserBids();
+        if (!bidsError) {
+          const myBids = bids?.length || 0;
+          setStats(prev => ({ ...prev, myBids }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading tenders data:', error);
+    }
+  };
+
+  const loadNotifications = async (userId) => {
+    try {
+      const { data, error } = await getUserNotifications();
+      if (error) throw error;
+      setNotifications(data || []);
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+    }
+  };
+
+  const loadRecentActivity = async (userId) => {
+    // This will be populated by other load functions
+    // Additional activity items can be added here
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
+
+  const getTimeAgo = (dateString) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 7) return `${diffInDays}d ago`;
+    return `${Math.floor(diffInDays / 7)}w ago`;
+  };
+
+  const getIssueIcon = (category) => {
+    const icons = {
+      roads: '🛣️',
+      utilities: '⚡',
+      environment: '🌱',
+      safety: '🚨',
+      parks: '🌳',
+      other: '📋',
+    };
+    return icons[category] || '📋';
+  };
+
+  const getStatusColor = (status) => {
+    const colors = {
+      pending: '#F59E0B',
+      acknowledged: '#3B82F6',
+      in_progress: '#1E40AF',
+      resolved: '#10B981',
+      closed: '#6B7280',
+      rejected: '#EF4444',
+    };
+    return colors[status] || '#6B7280';
+  };
+
+  const unreadNotifications = notifications.filter(n => !n.is_read).length;
+
+  const quickStatsData = [
+    {
+      id: 'issues',
+      title: 'My Issues',
+      value: stats.myIssues,
+      icon: MapPin,
+      color: '#EF4444',
+      change: '+2',
+    },
+    {
+      id: 'resolved',
+      title: 'Resolved',
+      value: stats.resolvedIssues,
+      icon: CheckCircle,
+      color: '#10B981',
+      change: '+12',
+    },
+    {
+      id: 'community',
+      title: 'Posts',
+      value: stats.communityPosts,
+      icon: MessageSquare,
+      color: '#8B5CF6',
+      change: '+5',
+    },
+    {
+      id: 'rank',
+      title: 'Rank',
+      value: profile?.points || 0,
+      icon: Trophy,
+      color: '#F59E0B',
+      change: '+3',
+    },
   ];
 
-  const recentIssues = [
-    { id: 1, title: 'Pothole on Main Street', status: 'In Progress', priority: 'High' },
-    { id: 2, title: 'Street Light Not Working', status: 'Resolved', priority: 'Medium' },
-    { id: 3, title: 'Garbage Collection Delayed', status: 'Pending', priority: 'High' },
-  ];
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Activity size={32} color="#1E40AF" />
+        <Text style={styles.loadingText}>{t('common.loading')}</Text>
+      </View>
+    );
+  }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>{t('home.greeting')}</Text>
-          <Text style={styles.userName}>
-            {profile?.full_name || user?.email?.split('@')[0] || 'User'}
-          </Text>
-        </View>
-        <TouchableOpacity style={styles.notificationButton}>
-          <Bell size={24} color="#1E40AF" />
-          <View style={styles.notificationBadge}>
-            <Text style={styles.badgeText}>3</Text>
+        <View style={styles.headerContent}>
+          <View style={styles.userInfo}>
+            <Text style={styles.greeting}>Good {getGreeting()}</Text>
+            <Text style={styles.userName}>
+              {profile?.full_name || user?.email?.split('@')[0] || 'User'}
+            </Text>
+            <View style={styles.userBadge}>
+              <Text style={styles.userType}>
+                {profile?.user_type === 'admin' ? '👨‍💼 Admin' : 
+                 profile?.user_type === 'tender' ? '🏗️ Contractor' : '👤 Citizen'}
+              </Text>
+            </View>
           </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* Stats Cards */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.totalIssues.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>{t('home.totalIssues')}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.resolvedIssues.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>{t('home.resolvedIssues')}</Text>
-          </View>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.activeUsers?.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>{t('home.activeUsers')}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.responseTime}</Text>
-            <Text style={styles.statLabel}>{t('home.avgResponse')}</Text>
-          </View>
+          <TouchableOpacity style={styles.notificationButton}>
+            <Bell size={20} color="#1E40AF" />
+            {unreadNotifications > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.badgeText}>{unreadNotifications}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Quick Actions */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('home.quickActions')}</Text>
-        <View style={styles.quickActionsGrid}>
-          {quickActions.map((action) => {
-            const IconComponent = action.icon;
+      {/* Quick Stats */}
+      <View style={styles.quickStatsSection}>
+        <Text style={styles.sectionTitle}>Overview</Text>
+        <View style={styles.quickStatsGrid}>
+          {quickStatsData.map((stat) => {
+            const IconComponent = stat.icon;
             return (
-              <TouchableOpacity
-                key={action.id}
-                style={[styles.quickActionCard, { backgroundColor: action.color + '15' }]}
-              >
-                <IconComponent size={32} color={action.color} />
-                <Text style={styles.quickActionTitle}>{action.title}</Text>
-              </TouchableOpacity>
+              <View key={stat.id} style={styles.quickStatCard}>
+                <View style={styles.statIconContainer}>
+                  <IconComponent size={16} color={stat.color} />
+                </View>
+                <Text style={styles.statValue}>{stat.value}</Text>
+                <Text style={styles.statTitle}>{stat.title}</Text>
+                <Text style={[styles.statChange, { color: stat.color }]}>
+                  {stat.change}
+                </Text>
+              </View>
             );
           })}
         </View>
       </View>
 
-      {/* Recent Issues */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('home.recentIssues')}</Text>
-        <View style={styles.issuesContainer}>
-          {issues.slice(0, 3).map((issue) => (
-            <TouchableOpacity key={issue.id} style={styles.issueCard}>
-              <View style={styles.issueHeader}>
-                <Text style={styles.issueTitle}>{issue.title}</Text>
-                <View style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor: issue.status === 'resolved' ? '#10B981' :
-                                   issue.status === 'in_progress' ? '#F59E0B' : '#EF4444'
-                  }
-                ]}>
-                  <Text style={styles.statusText}>{t(`status.${issue.status}`)}</Text>
-                </View>
+      {/* Key Metrics */}
+      <View style={styles.metricsSection}>
+        <Text style={styles.sectionTitle}>Community Impact</Text>
+        <View style={styles.metricsGrid}>
+          <View style={styles.metricCard}>
+            <View style={styles.metricHeader}>
+              <TrendingUp size={18} color="#10B981" />
+              <Text style={styles.metricValue}>{stats.totalIssues}</Text>
+            </View>
+            <Text style={styles.metricLabel}>Total Issues</Text>
+            <Text style={styles.metricSubtext}>Community wide</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <View style={styles.metricHeader}>
+              <CheckCircle size={18} color="#10B981" />
+              <Text style={styles.metricValue}>
+                {stats.totalIssues > 0 ? Math.round((stats.resolvedIssues / stats.totalIssues) * 100) : 0}%
+              </Text>
+            </View>
+            <Text style={styles.metricLabel}>Resolution Rate</Text>
+            <Text style={styles.metricSubtext}>This month</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <View style={styles.metricHeader}>
+              <Activity size={18} color="#F59E0B" />
+              <Text style={styles.metricValue}>{stats.responseTime}</Text>
+            </View>
+            <Text style={styles.metricLabel}>Avg Response</Text>
+            <Text style={styles.metricSubtext}>Time to resolve</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Recent Activity */}
+      <View style={styles.activitySection}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <TouchableOpacity>
+            <Text style={styles.seeAllText}>See All</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.activityList}>
+          {recentActivity.slice(0, 6).map((activity, index) => (
+            <TouchableOpacity key={`${activity.type}-${activity.id}-${index}`} style={styles.activityItem}>
+              <View style={styles.activityIcon}>
+                <Text style={styles.activityEmoji}>{activity.icon}</Text>
               </View>
-              <Text style={styles.issuePriority}>Priority: {t(`priority.${issue.priority}`)}</Text>
+              <View style={styles.activityContent}>
+                <Text style={styles.activityTitle} numberOfLines={1}>
+                  {activity.title}
+                </Text>
+                <Text style={styles.activityTime}>{activity.time}</Text>
+              </View>
+              <View style={[styles.activityStatus, { backgroundColor: activity.color }]}>
+                <Text style={styles.activityStatusText}>
+                  {activity.status}
+                </Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* Community Stats */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('home.communityImpact')}</Text>
-        <View style={styles.impactCard}>
-          <View style={styles.impactItem}>
-            <CheckCircle size={24} color="#10B981" />
-            <View style={styles.impactText}>
-              <Text style={styles.impactNumber}>856</Text>
-              <Text style={styles.impactLabel}>Issues Resolved This Month</Text>
+      {/* Quick Actions */}
+      <View style={styles.quickActionsSection}>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.quickActionsGrid}>
+          <TouchableOpacity style={styles.quickActionCard}>
+            <MapPin size={20} color="#EF4444" />
+            <Text style={styles.quickActionText}>Report Issue</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickActionCard}>
+            <TrendingUp size={20} color="#F59E0B" />
+            <Text style={styles.quickActionText}>View Heatmap</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickActionCard}>
+            <Users size={20} color="#10B981" />
+            <Text style={styles.quickActionText}>Leaderboard</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickActionCard}>
+            <MessageSquare size={20} color="#8B5CF6" />
+            <Text style={styles.quickActionText}>Community</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* User-specific sections */}
+      {profile?.user_type === 'tender' && (
+        <View style={styles.tenderSection}>
+          <Text style={styles.sectionTitle}>Contractor Dashboard</Text>
+          <View style={styles.tenderStats}>
+            <View style={styles.tenderStatCard}>
+              <Text style={styles.tenderStatValue}>{stats.activeTenders}</Text>
+              <Text style={styles.tenderStatLabel}>Active Tenders</Text>
+            </View>
+            <View style={styles.tenderStatCard}>
+              <Text style={styles.tenderStatValue}>{stats.myBids}</Text>
+              <Text style={styles.tenderStatLabel}>My Bids</Text>
             </View>
           </View>
-          <View style={styles.impactItem}>
-            <AlertTriangle size={24} color="#F59E0B" />
-            <View style={styles.impactText}>
-              <Text style={styles.impactNumber}>234</Text>
-              <Text style={styles.impactLabel}>Active Issues</Text>
+        </View>
+      )}
+
+      {/* Performance Insights */}
+      <View style={styles.insightsSection}>
+        <Text style={styles.sectionTitle}>Insights</Text>
+        <View style={styles.insightsList}>
+          <View style={styles.insightCard}>
+            <Star size={16} color="#F59E0B" />
+            <View style={styles.insightContent}>
+              <Text style={styles.insightTitle}>Community Engagement Up</Text>
+              <Text style={styles.insightText}>15% increase in community posts this week</Text>
+            </View>
+          </View>
+          
+          <View style={styles.insightCard}>
+            <TrendingUp size={16} color="#10B981" />
+            <View style={styles.insightContent}>
+              <Text style={styles.insightTitle}>Faster Response Times</Text>
+              <Text style={styles.insightText}>Issues resolved 20% faster than last month</Text>
             </View>
           </View>
         </View>
       </View>
-      
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>{t('common.loading')}</Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
+
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Morning';
+  if (hour < 17) return 'Afternoon';
+  return 'Evening';
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    backgroundColor: '#F8FAFC',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  header: {
+    backgroundColor: '#FFFFFF',
     paddingTop: 60,
     paddingBottom: 20,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  userInfo: {
+    flex: 1,
   },
   greeting: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#6B7280',
     fontWeight: '400',
   },
   userName: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: '#111827',
-    textTransform: 'capitalize',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  userBadge: {
+    backgroundColor: '#F0F9FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  userType: {
+    fontSize: 12,
+    color: '#1E40AF',
+    fontWeight: '600',
   },
   notificationButton: {
     position: 'relative',
     padding: 8,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   notificationBadge: {
     position: 'absolute',
-    top: 0,
-    right: 0,
+    top: 2,
+    right: 2,
     backgroundColor: '#EF4444',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    borderRadius: 8,
+    width: 16,
+    height: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   badgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
   },
-  statsContainer: {
-    padding: 20,
-    gap: 12,
+  quickStatsSection: {
+    backgroundColor: '#FFFFFF',
+    margin: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  statsRow: {
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  quickStatsGrid: {
     flexDirection: 'row',
     gap: 12,
   },
-  statCard: {
+  quickStatCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderRadius: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  statNumber: {
-    fontSize: 24,
+  statIconContainer: {
+    width: 28,
+    height: 28,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statValue: {
+    fontSize: 16,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  statLabel: {
-    fontSize: 14,
+  statTitle: {
+    fontSize: 10,
     color: '#6B7280',
     fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 2,
   },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
+  statChange: {
+    fontSize: 9,
+    fontWeight: '600',
   },
-  sectionTitle: {
-    fontSize: 20,
+  metricsSection: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  metricCard: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  metricHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  metricValue: {
+    fontSize: 16,
     fontWeight: '700',
     color: '#111827',
+  },
+  metricLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  metricSubtext: {
+    fontSize: 10,
+    color: '#6B7280',
+  },
+  activitySection: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
     marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  seeAllText: {
+    fontSize: 12,
+    color: '#1E40AF',
+    fontWeight: '600',
+  },
+  activityList: {
+    gap: 8,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  activityIcon: {
+    width: 32,
+    height: 32,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  activityEmoji: {
+    fontSize: 14,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  activityTime: {
+    fontSize: 10,
+    color: '#6B7280',
+  },
+  activityStatus: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  activityStatusText: {
+    fontSize: 9,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  quickActionsSection: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   quickActionsGrid: {
     flexDirection: 'row',
@@ -286,92 +733,95 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   quickActionCard: {
-    width: (width - 60) / 2,
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
-    gap: 12,
-  },
-  quickActionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  issuesContainer: {
-    gap: 12,
-  },
-  issueCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
+    width: (width - 80) / 2,
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    padding: 16,
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  issueHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  issueTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    marginRight: 12,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  statusText: {
-    color: '#FFFFFF',
+  quickActionText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#374151',
+    textAlign: 'center',
   },
-  issuePriority: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  impactCard: {
+  tenderSection: {
     backgroundColor: '#FFFFFF',
-    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
     borderRadius: 16,
-    gap: 16,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 2,
   },
-  impactItem: {
+  tenderStats: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
+    gap: 12,
   },
-  impactText: {
+  tenderStatCard: {
     flex: 1,
+    backgroundColor: '#F0F9FF',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
-  impactNumber: {
+  tenderStatValue: {
     fontSize: 20,
     fontWeight: '700',
+    color: '#1E40AF',
+    marginBottom: 4,
+  },
+  tenderStatLabel: {
+    fontSize: 12,
+    color: '#1E40AF',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  insightsSection: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 32,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  insightsList: {
+    gap: 12,
+  },
+  insightCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  insightContent: {
+    flex: 1,
+  },
+  insightTitle: {
+    fontSize: 12,
+    fontWeight: '600',
     color: '#111827',
+    marginBottom: 2,
   },
-  impactLabel: {
-    fontSize: 14,
+  insightText: {
+    fontSize: 11,
     color: '#6B7280',
-  },
-  loadingContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
+    lineHeight: 16,
   },
 });

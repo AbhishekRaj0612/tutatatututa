@@ -667,21 +667,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  submitButton: {
-    backgroundColor: '#1E40AF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
-    marginTop: 20,
-    shadowColor: '#1E40AF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
+submitButton: {
+  backgroundColor: '#1E40AF',
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: 16,
+  borderRadius: 12,
+  gap: 8,
+  marginTop: 20,
+
+  // ✅ new shadow API
+  boxShadow: "0px 4px 8px rgba(30, 64, 175, 0.3)",
+
+  // ✅ keep elevation for Android
+  elevation: 8,
+},
+
   submitButtonDisabled: {
     opacity: 0.6,
   },

@@ -35,7 +35,7 @@ export default function SplashScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <Animated.View 
+      <Animated.View
         style={[
           styles.logoContainer,
           {
@@ -45,15 +45,19 @@ export default function SplashScreen() {
         ]}
       >
         <View style={styles.iconContainer}>
-          <Text style={styles.iconText}>🏛️</Text>
+          <Image
+            source={require('../assets/images/favicon.png')}
+            style={styles.iconImage}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.appName}>जनConnect</Text>
         <Text style={styles.tagline}>Building Better Communities Together</Text>
       </Animated.View>
-      
+
       <View style={styles.loadingContainer}>
         <View style={styles.loadingBar}>
-          <Animated.View 
+          <Animated.View
             style={[
               styles.loadingFill,
               {
@@ -72,6 +76,18 @@ export default function SplashScreen() {
 }
 
 const styles = StyleSheet.create({
+  iconContainer: {
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#f0f0f0',
+  },
+  iconImage: {
+    width: 90,
+    height: 90,
+  },
   container: {
     flex: 1,
     backgroundColor: '#1E40AF',
@@ -91,12 +107,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 30,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
+
+    // ✅ new shadow API
+    boxShadow: "0px 8px 20px rgba(0, 0, 0, 0.3)",
+
+    // ✅ keep elevation for Android
     elevation: 15,
   },
+
   iconText: {
     fontSize: 48,
   },

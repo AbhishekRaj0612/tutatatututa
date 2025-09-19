@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin, CheckCircle } from 'lucide-react-native';
 import { signIn, signUp, sendVerificationEmail, getUserProfile } from '../lib/supabase';
@@ -68,7 +68,7 @@ export default function AuthScreen() {
 
   const handleAuth = async () => {
     setLoading(true);
-    
+
     try {
       // LOGIN FLOW
       if (isLogin) {
@@ -80,7 +80,7 @@ export default function AuthScreen() {
 
         console.log('Attempting to sign in...');
         const result = await signIn(formData.email.trim(), formData.password);
-        
+
         if (result.error) {
           console.error('Sign in error:', result.error);
           Alert.alert('Authentication Error', result.error.message || 'Failed to sign in');
@@ -95,11 +95,11 @@ export default function AuthScreen() {
         }
 
         console.log('Sign in successful, getting user profile...');
-        
+
         // Get user profile to determine user type for navigation
         const profileResult = await getUserProfile(result.user.id);
         let userType = 'user'; // default
-        
+
         if (profileResult.data) {
           userType = profileResult.data.user_type;
         } else {
@@ -112,7 +112,7 @@ export default function AuthScreen() {
         // Navigate based on user type
         switch (userType) {
           case 'admin':
-            router.replace('/admin-dashboard');
+            router.replace('/admin');
             break;
           case 'tender':
             router.replace('/tender-dashboard');
@@ -120,7 +120,7 @@ export default function AuthScreen() {
           default:
             router.replace('/(tabs)'); // citizen/home screen
         }
-        
+
         setLoading(false);
         return;
       }
@@ -158,16 +158,16 @@ export default function AuthScreen() {
         };
 
         const result = await signUp(
-          formData.email.trim(), 
-          formData.password, 
-          formData.userType, 
+          formData.email.trim(),
+          formData.password,
+          formData.userType,
           profileData
         );
 
         if (result.error) {
           console.error('Signup error:', result.error);
           let errorMessage = result.error.message || 'Failed to create account';
-          
+
           // Handle common errors
           if (result.error.message?.includes('already registered')) {
             errorMessage = 'This email is already registered. Please try signing in instead.';
@@ -176,7 +176,7 @@ export default function AuthScreen() {
           } else if (result.error.message?.includes('password')) {
             errorMessage = 'Password must be at least 6 characters long.';
           }
-          
+
           Alert.alert('Registration Error', errorMessage);
           setLoading(false);
           return;
@@ -184,7 +184,7 @@ export default function AuthScreen() {
 
         console.log('Account created successfully');
         setVerificationSent(true);
-        
+
         Alert.alert(
           'Account Created Successfully!',
           `Welcome to जनConnect! Please check your email (${formData.email}) and click the verification link to activate your account. You can then sign in.`,
@@ -252,7 +252,7 @@ export default function AuthScreen() {
     try {
       setLoading(true);
       const result = await sendVerificationEmail(formData.email);
-      
+
       if (result.error) {
         Alert.alert('Error', result.error.message || 'Failed to send verification email');
       } else {
@@ -332,15 +332,18 @@ export default function AuthScreen() {
     >
       <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.logo}>🏛️</Text>
+          <Image
+            source={require('../assets/images/favicon.png')} // same image as icon
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
           <Text style={styles.title}>जनConnect</Text>
           <Text style={styles.subtitle}>
-            {isLogin 
-              ? 'Welcome back to your civic platform!' 
-              : currentStep === 1 
-                ? 'Join your civic community' 
-                : 'Secure your account'
-            }
+            {isLogin
+              ? 'Welcome back to your civic platform!'
+              : currentStep === 1
+                ? 'Join your civic community'
+                : 'Secure your account'}
           </Text>
         </View>
 
@@ -548,8 +551,8 @@ export default function AuthScreen() {
 
           <View style={styles.buttonContainer}>
             {!isLogin && currentStep === 2 && (
-              <TouchableOpacity 
-                style={styles.backButton} 
+              <TouchableOpacity
+                style={styles.backButton}
                 onPress={goBack}
                 disabled={loading}
               >
@@ -557,17 +560,17 @@ export default function AuthScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.authButton,
                 loading && styles.authButtonDisabled,
                 !isLogin && currentStep === 2 && styles.authButtonHalf
-              ]} 
+              ]}
               onPress={handleAuthButtonPress}
               disabled={loading}
             >
               <Text style={styles.authButtonText}>
-                {loading 
+                {loading
                   ? (isLogin ? 'Signing In...' : currentStep === 1 ? 'Continue' : 'Creating Account...')
                   : (isLogin ? 'Sign In' : currentStep === 1 ? 'Continue' : 'Create Account')
                 }
@@ -579,7 +582,7 @@ export default function AuthScreen() {
             <Text style={styles.switchText}>
               {isLogin ? "Don't have an account? " : 'Already have an account? '}
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => {
                 setIsLogin(!isLogin);
                 setCurrentStep(1);
@@ -598,7 +601,7 @@ export default function AuthScreen() {
           {!isLogin && (
             <View style={styles.termsContainer}>
               <Text style={styles.termsText}>
-                By creating an account, you agree to our Terms of Service and Privacy Policy. 
+                By creating an account, you agree to our Terms of Service and Privacy Policy.
                 Your data helps us serve your community better.
               </Text>
             </View>
@@ -619,25 +622,24 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: 40,
+    marginBottom: 20,
+    marginTop: 60,
   },
-  logo: {
-    fontSize: 60,
-    marginBottom: 16,
+  logoImage: {
+    width: 50,
+    height: 50,
+    marginBottom: 10, // spacing between image and title
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 14,
+    color: '#666',
     textAlign: 'center',
-    paddingHorizontal: 40,
-    lineHeight: 22,
+    marginTop: 4,
   },
   stepIndicator: {
     paddingHorizontal: 40,
@@ -817,10 +819,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
-    shadowColor: '#1E40AF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+
+    // ✅ new shadow API
+    boxShadow: "0px 4px 8px rgba(30, 64, 175, 0.3)",
+
+    // ✅ keep elevation for Android
     elevation: 8,
   },
   authButtonHalf: {
@@ -828,8 +831,12 @@ const styles = StyleSheet.create({
   },
   authButtonDisabled: {
     backgroundColor: '#9CA3AF',
-    shadowOpacity: 0,
+
+    // ✅ no shadow
+    boxShadow: "none",
+    elevation: 0,
   },
+
   authButtonText: {
     color: '#FFFFFF',
     fontSize: 16,

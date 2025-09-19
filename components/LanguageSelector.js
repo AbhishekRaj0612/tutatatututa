@@ -5,8 +5,6 @@ import { useTranslation } from 'react-i18next';
 
 const languages = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Español', flag: '🇪🇸' },
-  { code: 'fr', name: 'Français', flag: '🇫🇷' },
   { code: 'hi', name: 'हिन्दी', flag: '🇮🇳' },
 ];
 
@@ -40,7 +38,7 @@ export default function LanguageSelector({ style }) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Select Language</Text>
-            
+
             {languages.map((language) => (
               <TouchableOpacity
                 key={language.code}
@@ -56,7 +54,7 @@ export default function LanguageSelector({ style }) {
                 )}
               </TouchableOpacity>
             ))}
-            
+
             <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setModalVisible(false)}

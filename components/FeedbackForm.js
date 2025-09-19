@@ -50,7 +50,7 @@ export default function FeedbackForm({ visible, onClose, issueId = null }) {
 
       Alert.alert(
         t('common.success'),
-        'Your feedback has been submitted successfully! We will review it and respond if necessary.',
+        'Your feedback has been submitted successfully! We will review it and respond if necessary. You can track the status in your feedback history.',
         [{ 
           text: t('common.ok'), 
           onPress: () => {
