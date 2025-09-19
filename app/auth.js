@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin, CheckCircle } from 'lucide-react-native';
-import { signIn, signUp, sendVerificationEmail } from '../lib/supabase';
+import { signIn, signUp, sendVerificationEmail, getUserProfile } from '../lib/supabase';
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,6 +10,7 @@ export default function AuthScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [verificationSent, setVerificationSent] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -26,22 +27,24 @@ export default function AuthScreen() {
   const router = useRouter();
 
   const userTypes = [
-    { id: 'user', label: 'Citizen', icon: '👤', color: '#1E40AF' },
-    { id: 'admin', label: 'Administrator', icon: '👨‍💼', color: '#10B981' },
-    { id: 'tender', label: 'Contractor', icon: '🏗️', color: '#F59E0B' },
+    { id: 'user', label: 'Citizen', icon: '👤', color: '#1E40AF', description: 'Report issues and engage with community' },
+    { id: 'admin', label: 'Administrator', icon: '👨‍💼', color: '#10B981', description: 'Manage city operations and issues' },
+    { id: 'tender', label: 'Contractor', icon: '🏗️', color: '#F59E0B', description: 'Bid on municipal projects and tenders' },
   ];
 
   const handleAuthButtonPress = async () => {
-    console.log('Button pressed - isLogin:', isLogin, 'currentStep:', currentStep);
-    console.log('Form data:', formData);
+    // Prevent double submission
+    if (loading) return;
 
-    // For signup step 1, just validate and move to next step
+    console.log('Button pressed - isLogin:', isLogin, 'currentStep:', currentStep);
+
+    // For signup step 1, validate and move to next step
     if (!isLogin && currentStep === 1) {
       console.log('Processing step 1 validation...');
 
       // Step 1 validation
-      if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
-        Alert.alert('Error', 'Please fill in all required fields');
+      if (!formData.firstName?.trim() || !formData.lastName?.trim() || !formData.email?.trim() || !formData.phone?.trim()) {
+        Alert.alert('Error', 'Please fill in all required fields (marked with *)');
         return;
       }
       if (!isValidEmail(formData.email)) {
@@ -54,9 +57,8 @@ export default function AuthScreen() {
       }
 
       console.log('Step 1 validation passed, moving to step 2');
-      // Move to step 2
       setCurrentStep(2);
-      return; // This is correct - we only want to move to next step
+      return;
     }
 
     console.log('Proceeding to handleAuth...');
@@ -64,24 +66,50 @@ export default function AuthScreen() {
     await handleAuth();
   };
 
-
   const handleAuth = async () => {
-    // LOGIN FLOW
-    if (isLogin) {
-      if (!formData.email || !formData.password) {
-        Alert.alert('Error', 'Please fill in email and password');
-        return;
-      }
-
-      try {
-        const result = await signIn(formData.email, formData.password);
-        if (result.error) {
-          Alert.alert('Authentication Error', result.error.message);
+    setLoading(true);
+    
+    try {
+      // LOGIN FLOW
+      if (isLogin) {
+        if (!formData.email?.trim() || !formData.password) {
+          Alert.alert('Error', 'Please fill in email and password');
+          setLoading(false);
           return;
         }
 
+        console.log('Attempting to sign in...');
+        const result = await signIn(formData.email.trim(), formData.password);
+        
+        if (result.error) {
+          console.error('Sign in error:', result.error);
+          Alert.alert('Authentication Error', result.error.message || 'Failed to sign in');
+          setLoading(false);
+          return;
+        }
+
+        if (!result.user) {
+          Alert.alert('Error', 'No user returned from authentication');
+          setLoading(false);
+          return;
+        }
+
+        console.log('Sign in successful, getting user profile...');
+        
+        // Get user profile to determine user type for navigation
+        const profileResult = await getUserProfile(result.user.id);
+        let userType = 'user'; // default
+        
+        if (profileResult.data) {
+          userType = profileResult.data.user_type;
+        } else {
+          // Fallback to metadata
+          userType = result.user.user_metadata?.user_type || 'user';
+        }
+
+        console.log('User type:', userType);
+
         // Navigate based on user type
-        const userType = result.user.user_metadata?.user_type || 'user';
         switch (userType) {
           case 'admin':
             router.replace('/admin-dashboard');
@@ -92,71 +120,74 @@ export default function AuthScreen() {
           default:
             router.replace('/(tabs)'); // citizen/home screen
         }
-      } catch (error) {
-        Alert.alert('Error', 'Login failed: ' + error.message);
-      }
-      return;
-    }
-
-    // SIGNUP FLOW
-    if (currentStep === 1) {
-      // Validate personal info
-      if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
-        Alert.alert('Error', 'Please fill in all required fields');
-        return;
-      }
-      if (!isValidEmail(formData.email)) {
-        Alert.alert('Error', 'Please enter a valid email address');
-        return;
-      }
-      if (!isValidPhone(formData.phone)) {
-        Alert.alert('Error', 'Please enter a valid phone number');
+        
+        setLoading(false);
         return;
       }
 
-      // Move to step 2
-      setCurrentStep(2);
-      return; // stop here, don’t try to create account yet
-    }
-
-    if (currentStep === 2) {
-      // Validate password info
-      if (!formData.password || !formData.confirmPassword) {
-        Alert.alert('Error', 'Please fill in password fields');
-        return;
-      }
-      if (formData.password !== formData.confirmPassword) {
-        Alert.alert('Error', 'Passwords do not match');
-        return;
-      }
-      if (formData.password.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters long');
-        return;
-      }
-
-      try {
-        const profileData = {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          fullName: `${formData.firstName} ${formData.lastName}`,
-          phone: formData.phone,
-          address: formData.address,
-          city: formData.city,
-          state: formData.state,
-          postalCode: formData.postalCode,
-        };
-
-        const result = await signUp(formData.email, formData.password, formData.userType, profileData);
-
-        if (result.error) {
-          Alert.alert('Authentication Error', result.error.message);
+      // SIGNUP FLOW
+      if (currentStep === 2) {
+        // Final validation for signup
+        if (!formData.password || !formData.confirmPassword) {
+          Alert.alert('Error', 'Please fill in password fields');
+          setLoading(false);
+          return;
+        }
+        if (formData.password !== formData.confirmPassword) {
+          Alert.alert('Error', 'Passwords do not match');
+          setLoading(false);
+          return;
+        }
+        if (formData.password.length < 6) {
+          Alert.alert('Error', 'Password must be at least 6 characters long');
+          setLoading(false);
           return;
         }
 
+        console.log('Creating account...');
+
+        const profileData = {
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+          phone: formData.phone.trim(),
+          address: formData.address?.trim() || '',
+          city: formData.city?.trim() || '',
+          state: formData.state?.trim() || '',
+          postalCode: formData.postalCode?.trim() || '',
+        };
+
+        const result = await signUp(
+          formData.email.trim(), 
+          formData.password, 
+          formData.userType, 
+          profileData
+        );
+
+        if (result.error) {
+          console.error('Signup error:', result.error);
+          let errorMessage = result.error.message || 'Failed to create account';
+          
+          // Handle common errors
+          if (result.error.message?.includes('already registered')) {
+            errorMessage = 'This email is already registered. Please try signing in instead.';
+          } else if (result.error.message?.includes('invalid email')) {
+            errorMessage = 'Please enter a valid email address.';
+          } else if (result.error.message?.includes('password')) {
+            errorMessage = 'Password must be at least 6 characters long.';
+          }
+          
+          Alert.alert('Registration Error', errorMessage);
+          setLoading(false);
+          return;
+        }
+
+        console.log('Account created successfully');
         setVerificationSent(true);
+        
         Alert.alert(
           'Account Created Successfully!',
-          'Please check your email and click the verification link to activate your account. You can then sign in.',
+          `Welcome to जनConnect! Please check your email (${formData.email}) and click the verification link to activate your account. You can then sign in.`,
           [
             {
               text: 'OK',
@@ -169,21 +200,25 @@ export default function AuthScreen() {
             },
           ]
         );
-      } catch (error) {
-        Alert.alert('Error', 'Signup failed: ' + error.message);
       }
+    } catch (error) {
+      console.error('Auth error:', error);
+      Alert.alert('Error', error.message || 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
     }
   };
 
-
   const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return emailRegex.test(email?.trim() || '');
   };
 
   const isValidPhone = (phone) => {
-    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-    return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+    const cleanPhone = (phone || '').replace(/[\s\-\(\)]/g, '');
+    // Allow various phone formats including Indian numbers
+    const phoneRegex = /^[\+]?[1-9][\d]{7,15}$/;
+    return phoneRegex.test(cleanPhone);
   };
 
   const resetForm = () => {
@@ -202,26 +237,31 @@ export default function AuthScreen() {
     });
   };
 
-  const goNextStep = () => {
-    if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
-      Alert.alert('Error', 'Please fill in all required fields');
-      return;
-    }
-    if (!isValidEmail(formData.email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
-      return;
-    }
-    if (!isValidPhone(formData.phone)) {
-      Alert.alert('Error', 'Please enter a valid phone number');
-      return;
-    }
-    // update step
-    setCurrentStep(2);
-  };
-
   const goBack = () => {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const resendVerification = async () => {
+    if (!formData.email) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await sendVerificationEmail(formData.email);
+      
+      if (result.error) {
+        Alert.alert('Error', result.error.message || 'Failed to send verification email');
+      } else {
+        Alert.alert('Success', 'Verification email sent! Please check your inbox.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to send verification email');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -247,6 +287,44 @@ export default function AuthScreen() {
     );
   };
 
+  const renderUserTypeSelection = () => {
+    if (isLogin) return null;
+
+    return (
+      <View style={styles.userTypeContainer}>
+        <Text style={styles.userTypeLabel}>Select User Type</Text>
+        <View style={styles.userTypeButtons}>
+          {userTypes.map((type) => (
+            <TouchableOpacity
+              key={type.id}
+              style={[
+                styles.userTypeButton,
+                formData.userType === type.id && styles.userTypeButtonActive,
+                { borderColor: formData.userType === type.id ? type.color : '#E5E7EB' },
+              ]}
+              onPress={() => setFormData({ ...formData, userType: type.id })}
+            >
+              <View style={styles.userTypeContent}>
+                <View style={styles.userTypeHeader}>
+                  <Text style={styles.userTypeIcon}>{type.icon}</Text>
+                  <Text
+                    style={[
+                      styles.userTypeText,
+                      formData.userType === type.id && { color: type.color },
+                    ]}
+                  >
+                    {type.label}
+                  </Text>
+                </View>
+                <Text style={styles.userTypeDescription}>{type.description}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -257,46 +335,28 @@ export default function AuthScreen() {
           <Text style={styles.logo}>🏛️</Text>
           <Text style={styles.title}>जनConnect</Text>
           <Text style={styles.subtitle}>
-            {isLogin ? 'Welcome back!' :
-              currentStep === 1 ? 'Create your account' : 'Set up your password'}
+            {isLogin 
+              ? 'Welcome back to your civic platform!' 
+              : currentStep === 1 
+                ? 'Join your civic community' 
+                : 'Secure your account'
+            }
           </Text>
         </View>
 
         {renderStepIndicator()}
 
         <View style={styles.form}>
-          {!isLogin && (
-            <View style={styles.userTypeContainer}>
-              <Text style={styles.userTypeLabel}>Select User Type</Text>
-              <View style={styles.userTypeButtons}>
-                {userTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type.id}
-                    style={[
-                      styles.userTypeButton,
-                      formData.userType === type.id && styles.userTypeButtonActive,
-                      { borderColor: type.color },
-                    ]}
-                    onPress={() => setFormData({ ...formData, userType: type.id })}
-                  >
-                    <Text style={styles.userTypeIcon}>{type.icon}</Text>
-                    <Text
-                      style={[
-                        styles.userTypeText,
-                        formData.userType === type.id && { color: type.color },
-                      ]}
-                    >
-                      {type.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
+          {renderUserTypeSelection()}
 
           {/* Step 1: Personal Information (Sign up only) */}
           {!isLogin && currentStep === 1 && (
             <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Personal Information</Text>
+                <Text style={styles.sectionSubtitle}>Fields marked with * are required</Text>
+              </View>
+
               <View style={styles.inputRow}>
                 <View style={[styles.inputContainer, styles.halfWidth]}>
                   <User size={20} color="#6B7280" style={styles.inputIcon} />
@@ -306,6 +366,7 @@ export default function AuthScreen() {
                     value={formData.firstName}
                     onChangeText={(text) => setFormData({ ...formData, firstName: text })}
                     autoCapitalize="words"
+                    autoComplete="given-name"
                   />
                 </View>
                 <View style={[styles.inputContainer, styles.halfWidth]}>
@@ -316,6 +377,7 @@ export default function AuthScreen() {
                     value={formData.lastName}
                     onChangeText={(text) => setFormData({ ...formData, lastName: text })}
                     autoCapitalize="words"
+                    autoComplete="family-name"
                   />
                 </View>
               </View>
@@ -326,9 +388,10 @@ export default function AuthScreen() {
                   style={styles.input}
                   placeholder="Email Address *"
                   value={formData.email}
-                  onChangeText={(text) => setFormData({ ...formData, email: text })}
+                  onChangeText={(text) => setFormData({ ...formData, email: text.toLowerCase() })}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoComplete="email"
                 />
               </View>
 
@@ -336,21 +399,28 @@ export default function AuthScreen() {
                 <Phone size={20} color="#6B7280" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Phone Number *"
+                  placeholder="Phone Number * (e.g., +91 9876543210)"
                   value={formData.phone}
                   onChangeText={(text) => setFormData({ ...formData, phone: text })}
                   keyboardType="phone-pad"
+                  autoComplete="tel"
                 />
+              </View>
+
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Address (Optional)</Text>
+                <Text style={styles.sectionSubtitle}>Help us serve your area better</Text>
               </View>
 
               <View style={styles.inputContainer}>
                 <MapPin size={20} color="#6B7280" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Address"
+                  placeholder="Full Address"
                   value={formData.address}
                   onChangeText={(text) => setFormData({ ...formData, address: text })}
                   multiline
+                  autoComplete="street-address"
                 />
               </View>
 
@@ -362,6 +432,7 @@ export default function AuthScreen() {
                     value={formData.city}
                     onChangeText={(text) => setFormData({ ...formData, city: text })}
                     autoCapitalize="words"
+                    autoComplete="address-level2"
                   />
                 </View>
                 <View style={[styles.inputContainer, styles.halfWidth]}>
@@ -371,6 +442,7 @@ export default function AuthScreen() {
                     value={formData.state}
                     onChangeText={(text) => setFormData({ ...formData, state: text })}
                     autoCapitalize="words"
+                    autoComplete="address-level1"
                   />
                 </View>
               </View>
@@ -382,6 +454,7 @@ export default function AuthScreen() {
                   value={formData.postalCode}
                   onChangeText={(text) => setFormData({ ...formData, postalCode: text })}
                   keyboardType="numeric"
+                  autoComplete="postal-code"
                 />
               </View>
             </>
@@ -390,18 +463,33 @@ export default function AuthScreen() {
           {/* Step 2: Password Setup (Sign up only) or Login Form */}
           {(isLogin || (!isLogin && currentStep === 2)) && (
             <>
-              {isLogin && (
-                <View style={styles.inputContainer}>
-                  <Mail size={20} color="#6B7280" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Email Address"
-                    value={formData.email}
-                    onChangeText={(text) => setFormData({ ...formData, email: text })}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
+              {!isLogin && (
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Account Security</Text>
+                  <Text style={styles.sectionSubtitle}>Create a strong password to protect your account</Text>
                 </View>
+              )}
+
+              {isLogin && (
+                <>
+                  <View style={styles.inputContainer}>
+                    <Mail size={20} color="#6B7280" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Email Address"
+                      value={formData.email}
+                      onChangeText={(text) => setFormData({ ...formData, email: text.toLowerCase() })}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                    />
+                  </View>
+
+                  {/* Resend verification option for login */}
+                  <TouchableOpacity style={styles.linkButton} onPress={resendVerification}>
+                    <Text style={styles.linkText}>Need to verify your email? Tap here</Text>
+                  </TouchableOpacity>
+                </>
               )}
 
               <View style={styles.inputContainer}>
@@ -412,6 +500,7 @@ export default function AuthScreen() {
                   value={formData.password}
                   onChangeText={(text) => setFormData({ ...formData, password: text })}
                   secureTextEntry={!showPassword}
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                 />
                 <TouchableOpacity
                   style={styles.eyeIcon}
@@ -426,60 +515,94 @@ export default function AuthScreen() {
               </View>
 
               {!isLogin && (
-                <View style={styles.inputContainer}>
-                  <Lock size={20} color="#6B7280" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Confirm Password *"
-                    value={formData.confirmPassword}
-                    onChangeText={(text) => setFormData({ ...formData, confirmPassword: text })}
-                    secureTextEntry={!showConfirmPassword}
-                  />
-                  <TouchableOpacity
-                    style={styles.eyeIcon}
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff size={20} color="#6B7280" />
-                    ) : (
-                      <Eye size={20} color="#6B7280" />
-                    )}
-                  </TouchableOpacity>
-                </View>
+                <>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color="#6B7280" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Confirm Password *"
+                      value={formData.confirmPassword}
+                      onChangeText={(text) => setFormData({ ...formData, confirmPassword: text })}
+                      secureTextEntry={!showConfirmPassword}
+                      autoComplete="new-password"
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeIcon}
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff size={20} color="#6B7280" />
+                      ) : (
+                        <Eye size={20} color="#6B7280" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.passwordHint}>
+                    Password must be at least 6 characters long
+                  </Text>
+                </>
               )}
             </>
           )}
 
           <View style={styles.buttonContainer}>
             {!isLogin && currentStep === 2 && (
-              <TouchableOpacity style={styles.backButton} onPress={goBack}>
+              <TouchableOpacity 
+                style={styles.backButton} 
+                onPress={goBack}
+                disabled={loading}
+              >
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity style={styles.authButton} onPress={handleAuthButtonPress}>
+            <TouchableOpacity 
+              style={[
+                styles.authButton,
+                loading && styles.authButtonDisabled,
+                !isLogin && currentStep === 2 && styles.authButtonHalf
+              ]} 
+              onPress={handleAuthButtonPress}
+              disabled={loading}
+            >
               <Text style={styles.authButtonText}>
-                {isLogin ? 'Sign In' : currentStep === 1 ? 'Continue' : 'Create Account'}
+                {loading 
+                  ? (isLogin ? 'Signing In...' : currentStep === 1 ? 'Continue' : 'Creating Account...')
+                  : (isLogin ? 'Sign In' : currentStep === 1 ? 'Continue' : 'Create Account')
+                }
               </Text>
             </TouchableOpacity>
-
-
           </View>
 
           <View style={styles.switchContainer}>
             <Text style={styles.switchText}>
               {isLogin ? "Don't have an account? " : 'Already have an account? '}
             </Text>
-            <TouchableOpacity onPress={() => {
-              setIsLogin(!isLogin);
-              setCurrentStep(1);
-              resetForm();
-            }}>
-              <Text style={styles.switchLink}>
+            <TouchableOpacity 
+              onPress={() => {
+                setIsLogin(!isLogin);
+                setCurrentStep(1);
+                resetForm();
+                setLoading(false);
+              }}
+              disabled={loading}
+            >
+              <Text style={[styles.switchLink, loading && styles.switchLinkDisabled]}>
                 {isLogin ? 'Sign Up' : 'Sign In'}
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Terms and Privacy Notice */}
+          {!isLogin && (
+            <View style={styles.termsContainer}>
+              <Text style={styles.termsText}>
+                By creating an account, you agree to our Terms of Service and Privacy Policy. 
+                Your data helps us serve your community better.
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -512,6 +635,9 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#6B7280',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+    lineHeight: 22,
   },
   stepIndicator: {
     paddingHorizontal: 40,
@@ -564,6 +690,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 40,
   },
+  sectionHeader: {
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
   userTypeContainer: {
     marginBottom: 30,
   },
@@ -577,8 +717,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   userTypeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
     padding: 16,
     borderWidth: 2,
     borderRadius: 12,
@@ -588,14 +726,26 @@ const styles = StyleSheet.create({
   userTypeButtonActive: {
     backgroundColor: '#F0F9FF',
   },
+  userTypeContent: {
+    gap: 8,
+  },
+  userTypeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   userTypeIcon: {
     fontSize: 24,
     marginRight: 12,
   },
   userTypeText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#6B7280',
+  },
+  userTypeDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginLeft: 36,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -625,6 +775,23 @@ const styles = StyleSheet.create({
   },
   eyeIcon: {
     padding: 4,
+  },
+  passwordHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: -12,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  linkButton: {
+    alignSelf: 'flex-end',
+    marginTop: -12,
+    marginBottom: 16,
+  },
+  linkText: {
+    fontSize: 14,
+    color: '#1E40AF',
+    textDecorationLine: 'underline',
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -659,6 +826,10 @@ const styles = StyleSheet.create({
   authButtonHalf: {
     flex: 2,
   },
+  authButtonDisabled: {
+    backgroundColor: '#9CA3AF',
+    shadowOpacity: 0,
+  },
   authButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
@@ -677,5 +848,18 @@ const styles = StyleSheet.create({
     color: '#1E40AF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  switchLinkDisabled: {
+    color: '#9CA3AF',
+  },
+  termsContainer: {
+    marginTop: 20,
+    paddingHorizontal: 8,
+  },
+  termsText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 18,
   },
 });
