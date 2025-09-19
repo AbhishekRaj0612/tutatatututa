@@ -1,120 +1,143 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FileText, DollarSign, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Search, Plus, Settings, LogOut, MapPin } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { 
+  FileText, DollarSign, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, 
+  Search, Plus, Settings, LogOut, MapPin, Calendar, User, Building, Award, TrendingUp
+} from 'lucide-react-native';
+import { 
+  getCurrentUser, 
+  getUserProfile, 
+  getTenders, 
+  getUserBids, 
+  createBid, 
+  signOut 
+} from '../lib/supabase';
 
 export default function TenderDashboard() {
   const router = useRouter();
-  const [contractorName, setContractorName] = useState('Contractor');
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('available');
   const [showBidForm, setShowBidForm] = useState(false);
   const [selectedTender, setSelectedTender] = useState(null);
   const [bidAmount, setBidAmount] = useState('');
   const [bidDetails, setBidDetails] = useState('');
+  const [tenders, setTenders] = useState([]);
+  const [userBids, setUserBids] = useState([]);
+  const [stats, setStats] = useState({
+    availableTenders: 0,
+    activeBids: 0,
+    wonContracts: 0,
+    totalEarnings: 0,
+    completionRate: 0,
+    avgBidValue: 0,
+  });
 
   useEffect(() => {
-    loadContractorData();
+    checkContractorAccess();
   }, []);
 
-  const loadContractorData = async () => {
-    try {
-      const email = await AsyncStorage.getItem('userEmail');
-      setContractorName(email?.split('@')[0] || 'Contractor');
-    } catch (error) {
-      console.log('Error loading contractor data:', error);
+  useEffect(() => {
+    if (user && profile) {
+      loadDashboardData();
     }
+  }, [user, profile, selectedFilter]);
+
+  const checkContractorAccess = async () => {
+    try {
+      const { user: currentUser, error: userError } = await getCurrentUser();
+      if (userError || !currentUser) {
+        Alert.alert('Access Denied', 'Please sign in to access contractor dashboard');
+        router.replace('/auth');
+        return;
+      }
+
+      const { data: profileData, error: profileError } = await getUserProfile(currentUser.id);
+      if (profileError || !profileData || profileData.user_type !== 'tender') {
+        Alert.alert('Access Denied', 'You do not have contractor privileges');
+        router.replace('/(tabs)');
+        return;
+      }
+
+      setUser(currentUser);
+      setProfile(profileData);
+    } catch (error) {
+      console.error('Error checking contractor access:', error);
+      router.replace('/auth');
+    }
+  };
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      const [tendersResult, bidsResult] = await Promise.all([
+        getTenders('all'),
+        getUserBids()
+      ]);
+
+      if (tendersResult.data) setTenders(tendersResult.data);
+      if (bidsResult.data) setUserBids(bidsResult.data);
+
+      // Calculate stats
+      const availableTenders = tendersResult.data?.filter(t => t.status === 'available').length || 0;
+      const activeBids = bidsResult.data?.filter(b => b.status === 'submitted').length || 0;
+      const wonContracts = bidsResult.data?.filter(b => b.status === 'accepted').length || 0;
+      
+      setStats({
+        availableTenders,
+        activeBids,
+        wonContracts,
+        totalEarnings: wonContracts * 15000, // Placeholder calculation
+        completionRate: wonContracts > 0 ? 94 : 0,
+        avgBidValue: bidsResult.data?.length > 0 ? 
+          bidsResult.data.reduce((sum, bid) => sum + (bid.amount || 0), 0) / bidsResult.data.length : 0
+      });
+
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      Alert.alert('Error', 'Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadDashboardData();
+    setRefreshing(false);
   };
 
   const handleLogout = async () => {
-    try {
-      await AsyncStorage.clear();
-      router.replace('/auth');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to logout');
-    }
-  };
-
-  const stats = {
-    availableTenders: 23,
-    activeBids: 8,
-    wonContracts: 12,
-    totalEarnings: '$234,500',
-    completionRate: '94%',
-    avgBidValue: '$18,200',
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut();
+              router.replace('/auth');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to logout');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const filters = [
-    { id: 'available', label: 'Available', count: 23 },
-    { id: 'bidded', label: 'My Bids', count: 8 },
-    { id: 'won', label: 'Won', count: 12 },
-    { id: 'completed', label: 'Completed', count: 45 },
-  ];
-
-  const tenders = [
-    {
-      id: 1,
-      title: 'Road Repair - Main Street Pothole',
-      description: 'Complete repair of multiple potholes along Main Street between 1st and 5th Avenue. Includes material supply and labor.',
-      category: 'roads',
-      location: 'Main Street, Downtown',
-      estimatedBudget: '$15,000 - $25,000',
-      deadline: '5 days',
-      priority: 'high',
-      status: 'available',
-      postedBy: 'City Works Department',
-      postedAt: '2 hours ago',
-      requirements: ['Licensed contractor', 'Road repair experience', 'Own equipment'],
-      bidsCount: 3,
-    },
-    {
-      id: 2,
-      title: 'Park Lighting Installation',
-      description: 'Install LED lighting system in Community Park including 12 lamp posts, wiring, and control system.',
-      category: 'utilities',
-      location: 'Community Park',
-      estimatedBudget: '$30,000 - $45,000',
-      deadline: '12 days',
-      priority: 'medium',
-      status: 'available',
-      postedBy: 'Parks & Recreation',
-      postedAt: '6 hours ago',
-      requirements: ['Electrical license', 'LED installation experience', 'Insurance coverage'],
-      bidsCount: 1,
-    },
-    {
-      id: 3,
-      title: 'Graffiti Removal - Public Buildings',
-      description: 'Remove graffiti from 3 public buildings and apply protective coating. Eco-friendly materials required.',
-      category: 'maintenance',
-      location: 'Multiple locations',
-      estimatedBudget: '$5,000 - $8,000',
-      deadline: '7 days',
-      priority: 'low',
-      status: 'bidded',
-      postedBy: 'Facilities Management',
-      postedAt: '1 day ago',
-      requirements: ['Cleaning experience', 'Eco-friendly materials', 'Background check'],
-      bidsCount: 5,
-      myBid: '$6,200',
-    },
-    {
-      id: 4,
-      title: 'Playground Equipment Repair',
-      description: 'Repair and safety inspection of playground equipment at Lincoln Elementary School playground.',
-      category: 'parks',
-      location: 'Lincoln Elementary School',
-      estimatedBudget: '$8,000 - $12,000',
-      deadline: '10 days',
-      priority: 'medium',
-      status: 'won',
-      postedBy: 'School District',
-      postedAt: '3 days ago',
-      requirements: ['Playground equipment certified', 'Safety inspection license', 'Child safety training'],
-      bidsCount: 7,
-      myBid: '$9,500',
-      awardDate: 'Yesterday',
-    },
+    { id: 'available', label: 'Available', count: stats.availableTenders },
+    { id: 'bidded', label: 'My Bids', count: stats.activeBids },
+    { id: 'won', label: 'Won', count: stats.wonContracts },
+    { id: 'completed', label: 'Completed', count: 0 },
   ];
 
   const getCategoryColor = (category) => {
@@ -164,46 +187,92 @@ export default function TenderDashboard() {
     setBidDetails('');
   };
 
-  const submitBid = () => {
+  const submitBid = async () => {
     if (!bidAmount || !bidDetails) {
       Alert.alert('Error', 'Please fill in all bid information');
       return;
     }
 
-    Alert.alert(
-      'Bid Submitted',
-      `Your bid of $${bidAmount} has been submitted successfully!`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            setShowBidForm(false);
-            setSelectedTender(null);
-            setBidAmount('');
-            setBidDetails('');
+    try {
+      const bidData = {
+        tender_id: selectedTender.id,
+        amount: parseFloat(bidAmount),
+        details: bidDetails,
+        status: 'submitted'
+      };
+
+      const { error } = await createBid(bidData);
+      if (error) throw error;
+
+      Alert.alert(
+        'Bid Submitted',
+        `Your bid of $${bidAmount} has been submitted successfully!`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setShowBidForm(false);
+              setSelectedTender(null);
+              setBidAmount('');
+              setBidDetails('');
+              loadDashboardData(); // Refresh data
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (error) {
+      console.error('Error submitting bid:', error);
+      Alert.alert('Error', 'Failed to submit bid: ' + error.message);
+    }
   };
 
   const filteredTenders = tenders.filter(tender => {
     switch (selectedFilter) {
       case 'available': return tender.status === 'available';
-      case 'bidded': return tender.status === 'bidded';
-      case 'won': return tender.status === 'won';
+      case 'bidded': return userBids.some(bid => bid.tender_id === tender.id);
+      case 'won': return userBids.some(bid => bid.tender_id === tender.id && bid.status === 'accepted');
       case 'completed': return tender.status === 'completed';
       default: return true;
     }
   });
 
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading contractor dashboard...</Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Contractor Portal</Text>
-          <Text style={styles.contractorName}>Welcome, {contractorName}</Text>
+          <Text style={styles.contractorName}>
+            Welcome, {profile?.full_name || profile?.first_name || 'Contractor'}
+          </Text>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerButton}>
@@ -222,15 +291,37 @@ export default function TenderDashboard() {
       <View style={styles.statsSection}>
         <Text style={styles.sectionTitle}>Business Overview</Text>
         <View style={styles.statsGrid}>
-          {Object.entries(stats).map(([key, value]) => (
-            <View key={key} style={styles.statCard}>
-              <View style={styles.statHeader}>
-                {/* Replace with correct icon based on key if needed */}
-                <Text style={styles.statNumber}>{value}</Text>
-              </View>
-              <Text style={styles.statLabel}>{key.replace(/([A-Z])/g, ' $1')}</Text>
+          <View style={styles.statCard}>
+            <View style={styles.statHeader}>
+              <FileText size={20} color="#1E40AF" />
+              <Text style={styles.statNumber}>{stats.availableTenders}</Text>
             </View>
-          ))}
+            <Text style={styles.statLabel}>Available Tenders</Text>
+          </View>
+          
+          <View style={styles.statCard}>
+            <View style={styles.statHeader}>
+              <Clock size={20} color="#F59E0B" />
+              <Text style={styles.statNumber}>{stats.activeBids}</Text>
+            </View>
+            <Text style={styles.statLabel}>Active Bids</Text>
+          </View>
+          
+          <View style={styles.statCard}>
+            <View style={styles.statHeader}>
+              <Award size={20} color="#10B981" />
+              <Text style={styles.statNumber}>{stats.wonContracts}</Text>
+            </View>
+            <Text style={styles.statLabel}>Won Contracts</Text>
+          </View>
+          
+          <View style={styles.statCard}>
+            <View style={styles.statHeader}>
+              <TrendingUp size={20} color="#8B5CF6" />
+              <Text style={styles.statNumber}>{formatCurrency(stats.totalEarnings)}</Text>
+            </View>
+            <Text style={styles.statLabel}>Total Earnings</Text>
+          </View>
         </View>
       </View>
 
@@ -298,46 +389,55 @@ export default function TenderDashboard() {
               <View style={styles.tenderDetails}>
                 <View style={styles.detailRow}>
                   <MapPin size={14} color="#6B7280" />
-                  <Text style={styles.detailText}>Location: {tender.location}</Text>
+                  <Text style={styles.detailText}>Location: {tender.location || 'Not specified'}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <DollarSign size={14} color="#10B981" />
-                  <Text style={styles.detailText}>Budget: {tender.estimatedBudget}</Text>
+                  <Text style={styles.detailText}>
+                    Budget: {formatCurrency(tender.estimated_budget_min)} - {formatCurrency(tender.estimated_budget_max)}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
-                  <Clock size={14} color="#F59E0B" />
-                  <Text style={styles.detailText}>Deadline: {tender.deadline}</Text>
+                  <Calendar size={14} color="#F59E0B" />
+                  <Text style={styles.detailText}>Deadline: {formatDate(tender.deadline_date)}</Text>
                 </View>
               </View>
 
               {/* Requirements */}
-              <View style={styles.requirementsSection}>
-                <Text style={styles.requirementsTitle}>Requirements:</Text>
-                {tender.requirements.map((req, index) => (
-                  <Text key={index} style={styles.requirement}>• {req}</Text>
-                ))}
-              </View>
+              {tender.requirements && tender.requirements.length > 0 && (
+                <View style={styles.requirementsSection}>
+                  <Text style={styles.requirementsTitle}>Requirements:</Text>
+                  {tender.requirements.map((req, index) => (
+                    <Text key={index} style={styles.requirement}>• {req}</Text>
+                  ))}
+                </View>
+              )}
 
               {/* Tender Info */}
               <View style={styles.tenderInfo}>
                 <Text style={styles.tenderInfoText}>
-                  Posted by {tender.postedBy} • {tender.postedAt} • {tender.bidsCount} bids
+                  Posted {formatDate(tender.created_at)} • {tender.bids?.length || 0} bids
                 </Text>
               </View>
 
               {/* My Bid Info */}
-              {tender.myBid && (
+              {userBids.find(bid => bid.tender_id === tender.id) && (
                 <View style={styles.myBidInfo}>
+                  {(() => {
+                    const myBid = userBids.find(bid => bid.tender_id === tender.id);
+                    return (
                   <Text style={styles.myBidText}>
-                    Your bid: {tender.myBid}
-                    {tender.awardDate && ` • Awarded ${tender.awardDate}`}
+                        Your bid: {formatCurrency(myBid.amount)}
+                        {myBid.status === 'accepted' && ` • Awarded`}
                   </Text>
+                    );
+                  })()}
                 </View>
               )}
 
               {/* Action Buttons */}
               <View style={styles.tenderActions}>
-                {tender.status === 'available' && (
+                {tender.status === 'available' && !userBids.find(bid => bid.tender_id === tender.id) && (
                   <TouchableOpacity
                     style={[styles.actionButton, styles.bidButton]}
                     onPress={() => handleBid(tender)}
@@ -351,7 +451,7 @@ export default function TenderDashboard() {
                   <Text style={styles.detailsButtonText}>View Details</Text>
                 </TouchableOpacity>
 
-                {tender.status === 'won' && (
+                {userBids.find(bid => bid.tender_id === tender.id && bid.status === 'accepted') && (
                   <TouchableOpacity style={[styles.actionButton, styles.startButton]}>
                     <Text style={styles.startButtonText}>Start Work</Text>
                   </TouchableOpacity>
@@ -420,6 +520,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
   header: {
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 20,
@@ -477,7 +588,7 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    minWidth: '30%',
+    minWidth: '45%',
     backgroundColor: '#F9FAFB',
     padding: 16,
     borderRadius: 12,
