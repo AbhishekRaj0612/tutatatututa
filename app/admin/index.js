@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import { 
-  Users, List as ListIcon, Settings, BarChart3, MessageSquare, 
-  Building, LogOut, Shield, Activity, TrendingUp, FileText 
-} from 'lucide-react-native';
+{"code":"rate-lding,Lceiml"U"c;
+  rr"f"o noadmindde
+ddd s{
+; iimt t ei== . r()
+ hpp  4ka
+:wLne'/alti0;Fle?eT y } >CnH/ 0m o'C' "eest e0ar'i"
+  :
+stsageSquare, Building, LogOut, Shield, Activity, TrendingUp, FileText } from 'lucide-react-native';
 import { getIssues, getCurrentUser, getUserProfile, signOut } from '../../lib/supabase';
 
 export default function AdminHome() {
