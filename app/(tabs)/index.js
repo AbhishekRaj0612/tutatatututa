@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, RefreshControl, Alert } from 'react-native';
-import { Bell, MapPin, Users, TrendingUp, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Trophy, MessageSquare, Star, Calendar, Activity } from 'lucide-react-native';
-import { getCurrentUser, getUserProfile, getIssues, getPosts, getTenders, getUserBids, getUserNotifications } from '../../lib/supabase';
+import { Bell, MapPin, Users, TrendingUp, CircleCheck as CheckCircle, Trophy, MessageSquare, Star, Activity } from 'lucide-react-native';
+import { getCurrentUser, getUserProfile, getIssues, getPosts, getTenders, getUserBids, getUserNotifications, getLeaderboard } from '../../lib/supabase';
 import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
@@ -21,11 +21,11 @@ export default function HomeScreen() {
     communityPosts: 0,
     activeTenders: 0,
     myBids: 0,
-    userRank: 0,
+    points: 0,
+    rank: '-',
     responseTime: '0 days',
   });
   const [recentActivity, setRecentActivity] = useState([]);
-  const [quickStats, setQuickStats] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -34,33 +34,47 @@ export default function HomeScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      
-      // Get current user
+
       const { user: currentUser, error: userError } = await getCurrentUser();
       if (userError) throw userError;
-      
-      if (currentUser) {
-        setUser(currentUser);
-        
-        // Get user profile
-        const { data: profileData, error: profileError } = await getUserProfile(currentUser.id);
-        if (profileError) throw profileError;
-        setProfile(profileData);
-        
-        // Load all data in parallel
-        await Promise.all([
-          loadIssuesData(currentUser.id),
-          loadCommunityData(),
-          loadTendersData(currentUser.id, profileData?.user_type),
-          loadNotifications(currentUser.id),
-          loadRecentActivity(currentUser.id),
-        ]);
-      }
+      if (!currentUser) throw new Error('User not signed in');
+      setUser(currentUser);
+
+      const { data: profileData, error: profileError } = await getUserProfile(currentUser.id);
+      if (profileError) throw profileError;
+      setProfile(profileData);
+
+      await Promise.all([
+        loadIssuesData(currentUser.id),
+        loadCommunityData(),
+        loadTendersData(currentUser.id, profileData?.user_type),
+        loadNotifications(currentUser.id),
+        loadLeaderboardStats(currentUser.id)
+      ]);
+
     } catch (error) {
       console.error('Error loading data:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Compute user's points, rank, and total issues from leaderboard
+  const loadLeaderboardStats = async (userId) => {
+    try {
+      const { data: leaderboardData, error } = await getLeaderboard('month');
+      if (error) throw error;
+
+      const sorted = (leaderboardData || []).sort((a, b) => (b.total_score ?? 0) - (a.total_score ?? 0));
+      const currentUserStats = sorted.find(u => u.id === userId) || {};
+      const rank = sorted.findIndex(u => u.id === userId) + 1 || '-';
+      const points = currentUserStats.total_score || 0;
+      const myIssues = currentUserStats.issues_reported || 0;
+
+      setStats(prev => ({ ...prev, points, rank, myIssues }));
+    } catch (error) {
+      console.error('Error loading leaderboard stats:', error);
     }
   };
 
@@ -70,22 +84,17 @@ export default function HomeScreen() {
       if (error) throw error;
 
       const totalIssues = allIssues?.length || 0;
-      const resolvedIssues = allIssues?.filter(issue => issue.status === 'resolved').length || 0;
-      const pendingIssues = allIssues?.filter(issue => issue.status === 'pending').length || 0;
-      const myIssues = allIssues?.filter(issue => issue.user_id === userId).length || 0;
+      const resolvedIssues = allIssues?.filter(i => i.status === 'resolved').length || 0;
+      const pendingIssues = allIssues?.filter(i => i.status === 'pending').length || 0;
 
       // Calculate average response time
-      const resolvedWithDates = allIssues?.filter(issue => 
-        issue.status === 'resolved' && issue.resolved_at && issue.created_at
-      ) || [];
-      
+      const resolvedWithDates = allIssues?.filter(i => i.status === 'resolved' && i.resolved_at && i.created_at) || [];
       let avgResponseTime = '0 days';
       if (resolvedWithDates.length > 0) {
         const totalDays = resolvedWithDates.reduce((sum, issue) => {
           const created = new Date(issue.created_at);
           const resolved = new Date(issue.resolved_at);
-          const days = Math.ceil((resolved - created) / (1000 * 60 * 60 * 24));
-          return sum + days;
+          return sum + Math.ceil((resolved - created) / (1000 * 60 * 60 * 24));
         }, 0);
         avgResponseTime = `${Math.round(totalDays / resolvedWithDates.length)} days`;
       }
@@ -95,11 +104,10 @@ export default function HomeScreen() {
         totalIssues,
         resolvedIssues,
         pendingIssues,
-        myIssues,
         responseTime: avgResponseTime,
       }));
 
-      // Set recent activity from issues
+      // Recent activity
       const recentIssues = allIssues?.slice(0, 5).map(issue => ({
         id: issue.id,
         type: 'issue',
@@ -109,8 +117,8 @@ export default function HomeScreen() {
         icon: getIssueIcon(issue.category),
         color: getStatusColor(issue.status),
       })) || [];
-
       setRecentActivity(prev => [...prev, ...recentIssues]);
+
     } catch (error) {
       console.error('Error loading issues data:', error);
     }
@@ -120,11 +128,8 @@ export default function HomeScreen() {
     try {
       const { data: posts, error } = await getPosts();
       if (error) throw error;
+      setStats(prev => ({ ...prev, communityPosts: posts?.length || 0 }));
 
-      const communityPosts = posts?.length || 0;
-      setStats(prev => ({ ...prev, communityPosts }));
-
-      // Add recent posts to activity
       const recentPosts = posts?.slice(0, 3).map(post => ({
         id: post.id,
         type: 'post',
@@ -134,7 +139,6 @@ export default function HomeScreen() {
         icon: '💬',
         color: '#8B5CF6',
       })) || [];
-
       setRecentActivity(prev => [...prev, ...recentPosts]);
     } catch (error) {
       console.error('Error loading community data:', error);
@@ -146,14 +150,12 @@ export default function HomeScreen() {
       const { data: tenders, error } = await getTenders();
       if (error) throw error;
 
-      const activeTenders = tenders?.filter(tender => tender.status === 'available').length || 0;
-      setStats(prev => ({ ...prev, activeTenders }));
+      setStats(prev => ({ ...prev, activeTenders: tenders?.filter(t => t.status === 'available').length || 0 }));
 
       if (userType === 'tender') {
         const { data: bids, error: bidsError } = await getUserBids();
         if (!bidsError) {
-          const myBids = bids?.length || 0;
-          setStats(prev => ({ ...prev, myBids }));
+          setStats(prev => ({ ...prev, myBids: bids?.length || 0 }));
         }
       }
     } catch (error) {
@@ -171,22 +173,10 @@ export default function HomeScreen() {
     }
   };
 
-  const loadRecentActivity = async (userId) => {
-    // This will be populated by other load functions
-    // Additional activity items can be added here
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
-
   const getTimeAgo = (dateString) => {
     const now = new Date();
     const date = new Date(dateString);
     const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
-    
     if (diffInHours < 1) return 'Just now';
     if (diffInHours < 24) return `${diffInHours}h ago`;
     const diffInDays = Math.floor(diffInHours / 24);
@@ -195,77 +185,37 @@ export default function HomeScreen() {
   };
 
   const getIssueIcon = (category) => {
-    const icons = {
-      roads: '🛣️',
-      utilities: '⚡',
-      environment: '🌱',
-      safety: '🚨',
-      parks: '🌳',
-      other: '📋',
-    };
+    const icons = { roads: '🛣️', utilities: '⚡', environment: '🌱', safety: '🚨', parks: '🌳', other: '📋' };
     return icons[category] || '📋';
   };
 
   const getStatusColor = (status) => {
-    const colors = {
-      pending: '#F59E0B',
-      acknowledged: '#3B82F6',
-      in_progress: '#1E40AF',
-      resolved: '#10B981',
-      closed: '#6B7280',
-      rejected: '#EF4444',
-    };
+    const colors = { pending: '#F59E0B', acknowledged: '#3B82F6', in_progress: '#1E40AF', resolved: '#10B981', closed: '#6B7280', rejected: '#EF4444' };
     return colors[status] || '#6B7280';
   };
 
   const unreadNotifications = notifications.filter(n => !n.is_read).length;
 
   const quickStatsData = [
-    {
-      id: 'issues',
-      title: 'My Issues',
-      value: stats.myIssues,
-      icon: MapPin,
-      color: '#EF4444',
-      change: '+2',
-    },
-    {
-      id: 'resolved',
-      title: 'Resolved',
-      value: stats.resolvedIssues,
-      icon: CheckCircle,
-      color: '#10B981',
-      change: '+12',
-    },
-    {
-      id: 'community',
-      title: 'Posts',
-      value: stats.communityPosts,
-      icon: MessageSquare,
-      color: '#8B5CF6',
-      change: '+5',
-    },
-    {
-      id: 'rank',
-      title: 'Rank',
-      value: profile?.points || 0,
-      icon: Trophy,
-      color: '#F59E0B',
-      change: '+3',
-    },
+    { id: 'issues', title: 'My Issues', value: stats.myIssues, icon: MapPin, color: '#EF4444', change: '+2' },
+    { id: 'resolved', title: 'Resolved', value: stats.resolvedIssues, icon: CheckCircle, color: '#10B981', change: '+12' },
+    { id: 'community', title: 'Posts', value: stats.communityPosts, icon: MessageSquare, color: '#8B5CF6', change: '+5' },
+    { id: 'rank', title: 'Rank', value: stats.rank, icon: Trophy, color: '#F59E0B', change: '+3' },
   ];
+
+  const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <Activity size={32} color="#1E40AF" />
-        <Text style={styles.loadingText}>{t('common.loading')}</Text>
+        <Text>{t('common.loading')}</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.container}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -281,8 +231,8 @@ export default function HomeScreen() {
             </Text>
             <View style={styles.userBadge}>
               <Text style={styles.userType}>
-                {profile?.user_type === 'admin' ? '👨‍💼 Admin' : 
-                 profile?.user_type === 'tender' ? '🏗️ Contractor' : '👤 Citizen'}
+                {profile?.user_type === 'admin' ? '👨‍💼 Admin' :
+                  profile?.user_type === 'tender' ? '🏗️ Contractor' : '👤 Citizen'}
               </Text>
             </View>
           </View>
@@ -384,7 +334,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Quick Actions */}
+      {/* Quick Actions
       <View style={styles.quickActionsSection}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickActionsGrid}>
@@ -408,7 +358,7 @@ export default function HomeScreen() {
             <Text style={styles.quickActionText}>Community</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </View> */}
 
       {/* User-specific sections */}
       {profile?.user_type === 'tender' && (
@@ -427,7 +377,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Performance Insights */}
+      {/* Performance Insights
       <View style={styles.insightsSection}>
         <Text style={styles.sectionTitle}>Insights</Text>
         <View style={styles.insightsList}>
@@ -447,7 +397,7 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
-      </View>
+      </View> */}
     </ScrollView>
   );
 }

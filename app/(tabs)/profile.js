@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { User, Mail, Phone, MapPin, Settings, Bell, Shield, LogOut, CreditCard as Edit3, Save, X, Camera, Star, Trophy, Activity } from 'lucide-react-native';
-import { getCurrentUser, getUserProfile, updateUserProfile, signOut } from '../../lib/supabase';
+import { getCurrentUser, getUserProfile, updateUserProfile, signOut, getLeaderboard } from '../../lib/supabase';
 import { useTranslation } from 'react-i18next';
 
 export default function ProfileScreen() {
@@ -35,36 +35,84 @@ export default function ProfileScreen() {
   const loadProfile = async () => {
     try {
       setLoading(true);
-      
+
+      // 1️⃣ Get current user
       const { user: currentUser, error: userError } = await getCurrentUser();
       if (userError) throw userError;
-      
-      if (currentUser) {
-        setUser(currentUser);
-        
-        const { data: profileData, error: profileError } = await getUserProfile(currentUser.id);
-        if (profileError) throw profileError;
-        
-        setProfile(profileData);
-        
-        if (profileData) {
-          setFormData({
-            first_name: profileData.first_name || '',
-            last_name: profileData.last_name || '',
-            phone: profileData.phone || '',
-            address: profileData.address || '',
-            city: profileData.city || '',
-            state: profileData.state || '',
-            postal_code: profileData.postal_code || '',
-          });
-          
-          setNotifications(profileData.notification_settings || {
-            email: true,
-            push: true,
-            sms: false,
-          });
-        }
+      if (!currentUser) throw new Error('User not signed in');
+
+      setUser(currentUser);
+
+      // 2️⃣ Get user profile
+      const { data: profileData, error: profileError } = await getUserProfile(currentUser.id);
+      if (profileError) throw profileError;
+
+      setProfile(profileData);
+
+      // 3️⃣ Initialize form
+      if (profileData) {
+        setFormData({
+          first_name: profileData.first_name || '',
+          last_name: profileData.last_name || '',
+          phone: profileData.phone || '',
+          address: profileData.address || '',
+          city: profileData.city || '',
+          state: profileData.state || '',
+          postal_code: profileData.postal_code || '',
+        });
+
+        setNotifications(profileData.notification_settings || {
+          email: true,
+          push: true,
+          sms: false,
+        });
       }
+
+      // 4️⃣ Fetch leaderboard to compute points, rank, and issues
+      const { data: leaderboardData, error: leaderboardError } = await getLeaderboard('month'); // adjust period if needed
+      if (leaderboardError) throw leaderboardError;
+
+      // Normalize leaderboard data
+      const usersMap = new Map();
+      (leaderboardData || []).forEach(u => {
+        const id = u.id || u.user_id || u.uid;
+        if (!id) return;
+
+        const score = Number(u.total_score ?? 0);
+        const issues = Number(u.issues_reported ?? 0);
+
+        if (!usersMap.has(id)) {
+          usersMap.set(id, { ...u, total_score: score, issues_reported: issues });
+        } else {
+          const prev = usersMap.get(id);
+          prev.total_score = Math.max(prev.total_score, score);
+          prev.issues_reported += issues;
+          usersMap.set(id, prev);
+        }
+      });
+
+      const sortedLeaderboard = Array.from(usersMap.values())
+        .sort((a, b) => b.total_score - a.total_score);
+
+      // Find current user's stats
+      const currentUserStats = sortedLeaderboard.find(u => u.id === currentUser.id);
+      let rank = '-';
+      let points = 0;
+      let issues = 0;
+      if (currentUserStats) {
+        points = currentUserStats.total_score;
+        issues = currentUserStats.issues_reported;
+        rank = sortedLeaderboard.findIndex(u => u.id === currentUser.id) + 1;
+      }
+
+      // Merge computed stats into profile
+      setProfile(prev => ({
+        ...prev,
+        total_score: points,
+        issues_reported: issues,
+        rank,
+      }));
+
     } catch (error) {
       console.error('Error loading profile:', error);
       Alert.alert('Error', 'Failed to load profile');
@@ -76,7 +124,7 @@ export default function ProfileScreen() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      
+
       const updates = {
         ...formData,
         full_name: `${formData.first_name} ${formData.last_name}`.trim(),
@@ -164,7 +212,6 @@ export default function ProfileScreen() {
               <Camera size={16} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
-          
           <View style={styles.userInfo}>
             <Text style={styles.userName}>
               {profile?.full_name || user?.email?.split('@')[0] || 'User'}
@@ -196,27 +243,31 @@ export default function ProfileScreen() {
 
       {/* Stats */}
       <View style={styles.statsSection}>
+        {/* Points */}
         <View style={styles.statCard}>
           <Star size={20} color="#F59E0B" />
-          <Text style={styles.statValue}>{profile?.points || 0}</Text>
+          <Text style={styles.statValue}>{profile?.total_score || 0}</Text>
           <Text style={styles.statLabel}>Points</Text>
         </View>
+
+        {/* Rank */}
         <View style={styles.statCard}>
           <Trophy size={20} color="#10B981" />
-          <Text style={styles.statValue}>#{Math.floor(Math.random() * 100) + 1}</Text>
+          <Text style={styles.statValue}>#{profile?.rank || '-'}</Text>
           <Text style={styles.statLabel}>Rank</Text>
         </View>
+
+        {/* Issues */}
         <View style={styles.statCard}>
           <Activity size={20} color="#8B5CF6" />
-          <Text style={styles.statValue}>{Math.floor(Math.random() * 50) + 1}</Text>
+          <Text style={styles.statValue}>{profile?.issues_reported || 0}</Text>
           <Text style={styles.statLabel}>Issues</Text>
         </View>
       </View>
-
       {/* Personal Information */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Personal Information</Text>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Email</Text>
           <View style={styles.inputContainer}>
@@ -335,7 +386,7 @@ export default function ProfileScreen() {
       {/* Notification Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Notification Settings</Text>
-        
+
         <View style={styles.settingItem}>
           <View style={styles.settingInfo}>
             <Bell size={20} color="#1E40AF" />
@@ -388,7 +439,7 @@ export default function ProfileScreen() {
       {/* Account Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
-        
+
         <TouchableOpacity style={styles.actionItem}>
           <Shield size={20} color="#8B5CF6" />
           <Text style={styles.actionText}>Privacy & Security</Text>

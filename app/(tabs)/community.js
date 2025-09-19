@@ -1,8 +1,71 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, RefreshControl, Image, Dimensions } from 'react-native';
-import { MessageSquare, Heart, Share, Send, Plus, Filter, Search, TrendingUp, MapPin, Clock, AlertTriangle, CheckCircle, Calendar, User } from 'lucide-react-native';
+import { MessageSquare, Filter, Search, MapPin, Clock, AlertTriangle, CheckCircle, Share } from 'lucide-react-native';
 import { getCommunityFeed, getCurrentUser, voteOnIssue, getUserVote } from '../../lib/supabase';
 import { useTranslation } from 'react-i18next';
+import { Platform, Share as RNShare } from "react-native";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system/legacy";
+
+const handleShare = async (item) => {
+  try {
+    const deepLink = `http://localhost:8081/community/${item.id}`;
+    const webLink = `http://localhost:8081/community/${item.id}`; 
+
+    if (Platform.OS === "web") {
+      // 🌐 Web → share text + link only
+      if (navigator.share) {
+        await navigator.share({
+          title: item.title || "Check this out",
+          text: item.description || "",
+          url: webLink,
+        });
+      } else {
+        alert("Sharing is not supported in this browser.");
+      }
+      return;
+    }
+
+    // 📱 Native → share link + optional image
+    if (item.imageUrl && item.imageUrl.startsWith("http")) {
+      if (!(await Sharing.isAvailableAsync())) {
+        alert("Sharing is not available on this device");
+        return;
+      }
+
+      // download image first
+      const filename = item.imageUrl.split("/").pop() || "shared-image.jpg";
+      const localPath = FileSystem.cacheDirectory + filename;
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        item.imageUrl,
+        localPath
+      );
+
+      const { uri } = await downloadResumable.downloadAsync();
+
+      // share image + link
+      await Sharing.shareAsync(uri, {
+        dialogTitle: item.title || "Check this out!",
+        mimeType: "image/jpeg",
+        UTI: "public.jpeg", // iOS
+      });
+
+      // also share text with deep link
+      await RNShare.share({
+        message: `${item.title || "Update"}\n\n${item.description || ""}\n\nOpen: ${deepLink}\nOr view in browser: ${webLink}`,
+      });
+    } else {
+      // fallback → only text + link
+      await RNShare.share({
+        message: `${item.title || "Update"}\n\n${item.description || ""}\n\nOpen: ${deepLink}\nOr view in browser: ${webLink}`,
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error sharing:", error.message);
+  }
+};
+
 
 const { width } = Dimensions.get('window');
 
@@ -63,7 +126,7 @@ export default function CommunityScreen() {
   const loadFeed = async () => {
     try {
       setLoading(true);
-      
+
       const filters = {
         category: selectedFilter,
         status: selectedStatus,
@@ -86,7 +149,7 @@ export default function CommunityScreen() {
       if (user) {
         const votes = {};
         const issueIds = filteredData.filter(item => item.type === 'issue').map(item => item.id);
-        
+
         for (const issueId of issueIds) {
           const { data: voteData } = await getUserVote(issueId);
           if (voteData) {
@@ -172,7 +235,7 @@ export default function CommunityScreen() {
     const now = new Date();
     const date = new Date(dateString);
     const diffInHours = Math.floor((now - date) / (1000 * 60 * 60));
-    
+
     if (diffInHours < 1) return 'Just now';
     if (diffInHours < 24) return `${diffInHours}h ago`;
     const diffInDays = Math.floor(diffInHours / 24);
@@ -215,7 +278,7 @@ export default function CommunityScreen() {
               <Text style={styles.postTime}>{formatTimeAgo(item.created_at)}</Text>
             </View>
           </View>
-          
+
           <View style={styles.postMeta}>
             <View style={[styles.typeBadge, { backgroundColor: isIssue ? '#FEF3C7' : '#E0F2FE' }]}>
               <Text style={[styles.typeBadgeText, { color: isIssue ? '#92400E' : '#0369A1' }]}>
@@ -243,7 +306,7 @@ export default function CommunityScreen() {
                     {item.category.charAt(0).toUpperCase() + item.category.slice(1)}
                   </Text>
                 </View>
-                
+
                 <View style={styles.statusContainer}>
                   {getStatusIcon(item.status)}
                   <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
@@ -297,46 +360,29 @@ export default function CommunityScreen() {
         <View style={styles.feedActions}>
           {isIssue ? (
             <>
-              <TouchableOpacity
-                style={[styles.actionButton, userVote === 'upvote' && styles.actionButtonActive]}
-                onPress={() => handleVote(item.id, 'upvote')}
-              >
-                <Heart
-                  size={18}
-                  color={userVote === 'upvote' ? '#EF4444' : '#6B7280'}
-                  fill={userVote === 'upvote' ? '#EF4444' : 'transparent'}
-                />
-                <Text style={[styles.actionText, userVote === 'upvote' && { color: '#EF4444' }]}>
-                  {item.engagement.likes}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton}>
-                <MessageSquare size={18} color="#6B7280" />
-                <Text style={styles.actionText}>{item.engagement.comments}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton}>
-                <Share size={18} color="#6B7280" />
-                <Text style={styles.actionText}>Share</Text>
-              </TouchableOpacity>
+              <View style={styles.feedActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleShare(item)}
+                >
+                  <Share size={18} color="#6B7280" />
+                  <Text style={styles.actionText}>Share</Text>
+                </TouchableOpacity>
+              </View>
             </>
           ) : (
             <>
-              <TouchableOpacity style={styles.actionButton}>
-                <Heart size={18} color="#6B7280" />
-                <Text style={styles.actionText}>{item.engagement.likes}</Text>
-              </TouchableOpacity>
+              <View style={styles.feedActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleShare(item)}
+                >
+                  <Share size={18} color="#6B7280" />
+                  <Text style={styles.actionText}>Share</Text>
+                </TouchableOpacity>
+              </View>
 
-              <TouchableOpacity style={styles.actionButton}>
-                <MessageSquare size={18} color="#6B7280" />
-                <Text style={styles.actionText}>{item.engagement.comments}</Text>
-              </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton}>
-                <Share size={18} color="#6B7280" />
-                <Text style={styles.actionText}>{item.engagement.shares}</Text>
-              </TouchableOpacity>
             </>
           )}
         </View>
@@ -363,7 +409,7 @@ export default function CommunityScreen() {
             onChangeText={setSearchQuery}
           />
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.filterButton}
           onPress={() => setShowFilters(!showFilters)}
         >

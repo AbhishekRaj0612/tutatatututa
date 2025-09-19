@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { Trophy, Medal, Star, Users, TrendingUp, Award, MapPin, MessageSquare, CircleCheck as CheckCircle, Activity } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+  Trophy, Medal, Star, Users, TrendingUp, Award,
+  MapPin, MessageSquare, Activity
+} from 'lucide-react-native';
 import { getLeaderboard } from '../../lib/supabase';
 
 export default function LeaderboardScreen() {
@@ -25,34 +28,67 @@ export default function LeaderboardScreen() {
       const { data, error } = await getLeaderboard(selectedPeriod);
       if (error) throw error;
 
-      let filteredData = data || [];
+      // quick debug: inspect what the backend returned
+      console.log('raw leaderboard data:', JSON.stringify(data, null, 2));
 
-      // Filter by category
-      if (selectedCategory !== 'all') {
-        // This would need additional filtering logic based on category
-        // For now, we'll show all data
-      }
+      // Normalize, parse numeric fields and dedupe by user id
+      const map = new Map();
+      (data || []).forEach((u) => {
+        const id = u.id || u.user_id || u.uid;
+        if (!id) return; // skip weird rows
+
+        // defensive parsing
+        const score = Number(u.total_score ?? u.score ?? 0) || 0;
+        const issues = Number(u.issues_reported ?? u.issue_count ?? 0) || 0;
+        const posts = Number(u.posts_created ?? u.post_count ?? 0) || 0;
+
+        // parse badges if backend returned a JSON string
+        let badges = [];
+        if (Array.isArray(u.badges)) badges = u.badges;
+        else if (typeof u.badges === 'string' && u.badges.length) {
+          try { badges = JSON.parse(u.badges); }
+          catch { badges = u.badges.split?.(',').map(s => s.trim()) || []; }
+        }
+
+        if (!map.has(id)) {
+          map.set(id, { ...u, id, total_score: score, issues_reported: issues, posts_created: posts, badges });
+        } else {
+          const prev = map.get(id);
+          // IMPORTANT: if duplicate rows exist due to joins, do NOT blindly sum total_score—
+          // choose the max (most likely the correct snapshot), but sum counts like issues/posts if you want aggregate counts.
+          prev.total_score = Math.max(prev.total_score || 0, score);
+          prev.issues_reported = (prev.issues_reported || 0) + issues;
+          prev.posts_created = (prev.posts_created || 0) + posts;
+          prev.badges = Array.from(new Set([...(prev.badges || []), ...badges]));
+          map.set(id, prev);
+        }
+      });
+
+      let filteredData = Array.from(map.values());
+
+      // sort descending by numeric score
+      filteredData.sort((a, b) => (Number(b.total_score) || 0) - (Number(a.total_score) || 0));
 
       setLeaderboardData(filteredData);
 
-      // Calculate stats
+      // Stats: always coerce to Number to avoid string concatenation
       const totalUsers = filteredData.length;
-      const totalIssues = filteredData.reduce((sum, user) => sum + (user.issues_reported || 0), 0);
-      const totalPosts = filteredData.reduce((sum, user) => sum + (user.posts_created || 0), 0);
-      const avgScore = totalUsers > 0 ? Math.round(filteredData.reduce((sum, user) => sum + (user.total_score || 0), 0) / totalUsers) : 0;
+      const totalIssues = filteredData.reduce((s, u) => s + (Number(u.issues_reported) || 0), 0);
+      const totalPosts = filteredData.reduce((s, u) => s + (Number(u.posts_created) || 0), 0);
+      const avgScore =
+        totalUsers > 0
+          ? Math.round(filteredData.reduce((s, u) => s + (Number(u.total_score) || 0), 0) / totalUsers)
+          : 0;
 
-      setStats({
-        totalUsers,
-        totalIssues,
-        totalPosts,
-        avgScore,
-      });
+      setStats({ totalUsers, totalIssues, totalPosts, avgScore });
     } catch (error) {
       console.error('Error loading leaderboard:', error);
     } finally {
       setLoading(false);
     }
   };
+
+
   const periods = [
     { id: 'week', label: 'This Week' },
     { id: 'month', label: 'This Month' },
@@ -67,26 +103,22 @@ export default function LeaderboardScreen() {
     { id: 'solver', label: 'Problem Solvers' },
   ];
 
-  // Get top 3 users for podium
-  const topUsers = leaderboardData.slice(0, 3).map((user, index) => ({
+  // Top 3
+  const getDefaultAvatar = (name) => {
+    const avatars = ['👤', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '👨‍💻', '👩‍💻'];
+    const index = name && name.length ? name.length % avatars.length : 0;
+    return avatars[index];
+  };
+
+  const topUsers = leaderboardData.slice(0, 3).map((user, idx) => ({
     ...user,
-    rank: index + 1,
+    rank: idx + 1,
     avatar: user.avatar_url || getDefaultAvatar(user.full_name || user.first_name || 'User'),
     name: user.full_name || user.first_name || 'Anonymous',
-    change: '+' + Math.floor(Math.random() * 20), // This would come from actual data
+    change: '+' + Math.floor(Math.random() * 20),
   }));
 
-  // Get remaining users for list
   const remainingUsers = leaderboardData.slice(3);
-
-  const getRankColor = (rank) => {
-    switch (rank) {
-      case 1: return '#FFD700';
-      case 2: return '#C0C0C0';
-      case 3: return '#CD7F32';
-      default: return '#1E40AF';
-    }
-  };
 
   const getRankIcon = (rank) => {
     switch (rank) {
@@ -97,12 +129,6 @@ export default function LeaderboardScreen() {
     }
   };
 
-  const getDefaultAvatar = (name) => {
-    const avatars = ['👤', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '👨‍💻', '👩‍💻'];
-    const index = name && name.length ? name.length % avatars.length : 0;
-    return avatars[index];
-  };
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -111,6 +137,7 @@ export default function LeaderboardScreen() {
       </View>
     );
   }
+
   return (
     <ScrollView style={styles.container}>
       {/* Header */}
@@ -119,28 +146,22 @@ export default function LeaderboardScreen() {
         <Text style={styles.subtitle}>Recognizing active community members</Text>
       </View>
 
-      {/* Filter Controls */}
+      {/* Filters */}
       <View style={styles.filtersSection}>
         <View style={styles.filterGroup}>
           <Text style={styles.filterLabel}>Time Period</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.filterButtons}>
-              {periods.map((period) => (
+              {periods.map((p) => (
                 <TouchableOpacity
-                  key={period.id}
-                  style={[
-                    styles.filterButton,
-                    selectedPeriod === period.id && styles.filterButtonActive,
-                  ]}
-                  onPress={() => setSelectedPeriod(period.id)}
+                  key={p.id}
+                  style={[styles.filterButton, selectedPeriod === p.id && styles.filterButtonActive]}
+                  onPress={() => setSelectedPeriod(p.id)}
                 >
                   <Text
-                    style={[
-                      styles.filterText,
-                      selectedPeriod === period.id && styles.filterTextActive,
-                    ]}
+                    style={[styles.filterText, selectedPeriod === p.id && styles.filterTextActive]}
                   >
-                    {period.label}
+                    {p.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -152,22 +173,16 @@ export default function LeaderboardScreen() {
           <Text style={styles.filterLabel}>Category</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.filterButtons}>
-              {categories.map((category) => (
+              {categories.map((c) => (
                 <TouchableOpacity
-                  key={category.id}
-                  style={[
-                    styles.filterButton,
-                    selectedCategory === category.id && styles.filterButtonActive,
-                  ]}
-                  onPress={() => setSelectedCategory(category.id)}
+                  key={c.id}
+                  style={[styles.filterButton, selectedCategory === c.id && styles.filterButtonActive]}
+                  onPress={() => setSelectedCategory(c.id)}
                 >
                   <Text
-                    style={[
-                      styles.filterText,
-                      selectedCategory === category.id && styles.filterTextActive,
-                    ]}
+                    style={[styles.filterText, selectedCategory === c.id && styles.filterTextActive]}
                   >
-                    {category.label}
+                    {c.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -176,112 +191,97 @@ export default function LeaderboardScreen() {
         </View>
       </View>
 
-      {/* Top 3 Podium */}
+      {/* Podium */}
       {topUsers.length >= 3 && (
-      <View style={styles.podiumSection}>
-        <Text style={styles.sectionTitle}>Top Contributors</Text>
-        <View style={styles.podium}>
-          {/* Second Place */}
-          <View style={styles.podiumPlace}>
-            <Text style={styles.podiumAvatar}>{topUsers[1].avatar}</Text>
-            <View style={[styles.podiumBar, styles.secondPlace]} />
-            <Text style={styles.podiumName}>{topUsers[1].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[1].total_score}</Text>
-            <Medal size={20} color="#C0C0C0" />
-          </View>
-
-          {/* First Place */}
-          <View style={styles.podiumPlace}>
-            <View style={styles.crownContainer}>
-              <Text style={styles.crown}>👑</Text>
+        <View style={styles.podiumSection}>
+          <Text style={styles.sectionTitle}>Top Contributors</Text>
+          <View style={styles.podium}>
+            {/* 2nd */}
+            <View style={styles.podiumPlace}>
+              <Text style={styles.podiumAvatar}>{topUsers[1].avatar}</Text>
+              <View style={[styles.podiumBar, styles.secondPlace]} />
+              <Text style={styles.podiumName}>{topUsers[1].name.split(' ')[0]}</Text>
+              <Text style={styles.podiumScore}>{topUsers[1].total_score}</Text>
+              <Medal size={20} color="#C0C0C0" />
             </View>
-            <Text style={styles.podiumAvatar}>{topUsers[0].avatar}</Text>
-            <View style={[styles.podiumBar, styles.firstPlace]} />
-            <Text style={styles.podiumName}>{topUsers[0].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[0].total_score}</Text>
-            <Trophy size={20} color="#FFD700" />
-          </View>
 
-          {/* Third Place */}
-          <View style={styles.podiumPlace}>
-            <Text style={styles.podiumAvatar}>{topUsers[2].avatar}</Text>
-            <View style={[styles.podiumBar, styles.thirdPlace]} />
-            <Text style={styles.podiumName}>{topUsers[2].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[2].total_score}</Text>
-            <Award size={20} color="#CD7F32" />
+            {/* 1st */}
+            <View style={styles.podiumPlace}>
+              <Text style={styles.crown}>👑</Text>
+              <Text style={styles.podiumAvatar}>{topUsers[0].avatar}</Text>
+              <View style={[styles.podiumBar, styles.firstPlace]} />
+              <Text style={styles.podiumName}>{topUsers[0].name.split(' ')[0]}</Text>
+              <Text style={styles.podiumScore}>{topUsers[0].total_score}</Text>
+              <Trophy size={20} color="#FFD700" />
+            </View>
+
+            {/* 3rd */}
+            <View style={styles.podiumPlace}>
+              <Text style={styles.podiumAvatar}>{topUsers[2].avatar}</Text>
+              <View style={[styles.podiumBar, styles.thirdPlace]} />
+              <Text style={styles.podiumName}>{topUsers[2].name.split(' ')[0]}</Text>
+              <Text style={styles.podiumScore}>{topUsers[2].total_score}</Text>
+              <Award size={20} color="#CD7F32" />
+            </View>
           </View>
         </View>
-      </View>
       )}
 
-      {/* Top 3 Details */}
+      {/* Top 3 list */}
       {topUsers.length > 0 && (
-      <View style={styles.topThreeSection}>
-        {topUsers.map((user, index) => (
-          <TouchableOpacity key={user.id || index} style={styles.topUserCard}>
-            <View style={styles.userRank}>
-              {getRankIcon(index + 1)}
-            </View>
-            <Text style={styles.userAvatar}>{user.avatar}</Text>
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>{user.full_name || user.first_name || 'Anonymous'}</Text>
-              <Text style={styles.userLevel}>{user.level}</Text>
-              <View style={styles.userStats}>
-                <Text style={styles.statText}>{user.issues_reported || 0} reported</Text>
-                <Text style={styles.statText}>{user.issues_resolved || 0} resolved</Text>
-                <Text style={styles.statText}>{user.posts_created || 0} posts</Text>
+        <View style={styles.topThreeSection}>
+          {topUsers.map((user, i) => (
+            <TouchableOpacity key={user.id || i} style={styles.topUserCard}>
+              <View style={styles.userRank}>{getRankIcon(i + 1)}</View>
+              <Text style={styles.userAvatar}>{user.avatar}</Text>
+              <View style={styles.userInfo}>
+                <Text style={styles.userName}>{user.full_name || user.first_name || 'Anonymous'}</Text>
+                <Text style={styles.userLevel}>{user.level}</Text>
+                <View style={styles.userStats}>
+                  <Text style={styles.statText}>{user.issues_reported || 0} reported</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.userScore}>
-              <Text style={styles.scoreNumber}>{user.total_score || 0}</Text>
-              <Text style={[
-                styles.scoreChange,
-                { color: user.change.startsWith('+') ? '#10B981' : '#EF4444' }
-              ]}>
-                {user.change}
-              </Text>
-            </View>
-            <View style={styles.userBadges}>
-              {(user.badges || []).map((badge, badgeIndex) => (
-                <Text key={badgeIndex} style={styles.badge}>{badge}</Text>
-              ))}
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
+              <View style={styles.userScore}>
+                <Text style={styles.scoreNumber}>{user.total_score || 0}</Text>
+              </View>
+              <View style={styles.userBadges}>
+                {(user.badges || []).map((badge, idx) => (
+                  <Text key={idx} style={styles.badge}>{badge}</Text>
+                ))}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
       )}
 
-      {/* Rest of Leaderboard */}
+      {/* Remaining leaderboard
       <View style={styles.leaderboardSection}>
         <Text style={styles.sectionTitle}>Rankings</Text>
         <View style={styles.leaderboardList}>
-          {remainingUsers.map((user, index) => (
-            <TouchableOpacity key={user.id || index} style={styles.leaderboardItem}>
+          {remainingUsers.map((u, i) => (
+            <TouchableOpacity key={u.id || i} style={styles.leaderboardItem}>
               <View style={styles.itemRank}>
-                <Text style={styles.rankNumber}>#{index + 4}</Text>
+                <Text style={styles.rankNumber}>#{i + 4}</Text>
               </View>
-              <Text style={styles.itemAvatar}>{user.avatar_url || getDefaultAvatar(user.full_name || user.first_name || 'User')}</Text>
+              <Text style={styles.itemAvatar}>{u.avatar_url || getDefaultAvatar(u.full_name || u.first_name || 'User')}</Text>
               <View style={styles.itemInfo}>
-                <Text style={styles.itemName}>{user.full_name || user.first_name || 'Anonymous'}</Text>
-                <Text style={styles.itemScore}>{user.total_score || 0} points</Text>
+                <Text style={styles.itemName}>{u.full_name || u.first_name || 'Anonymous'}</Text>
+                <Text style={styles.itemScore}>{u.total_score || 0} points</Text>
                 <View style={styles.itemStats}>
                   <Text style={styles.itemStatText}>
-                    {user.issues_reported || 0} issues • {user.posts_created || 0} posts
+                    {u.issues_reported || 0} issues • {u.posts_created || 0} posts
                   </Text>
                 </View>
               </View>
-              <Text style={[
-                styles.itemChange,
-                { color: '#10B981' }
-              ]}>
+              <Text style={[styles.itemChange, { color: '#10B981' }]}>
                 +{Math.floor(Math.random() * 10)}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
-      </View>
+      </View> */}
 
-      {/* Stats Summary */}
+      {/* Stats summary */}
       <View style={styles.statsSection}>
         <Text style={styles.sectionTitle}>Community Stats</Text>
         <View style={styles.statsGrid}>
