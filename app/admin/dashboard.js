@@ -1,11 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { 
-  BarChart3, Users, AlertTriangle, CheckCircle, Clock, MapPin, Filter, 
-  Search, Settings, LogOut, MessageSquare, FileText, DollarSign, 
-  Calendar, Eye, Edit, Trash2, Plus, Send, UserCheck, Building
-} from 'lucide-react-native';
+import { ChartBar as BarChart3, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, MapPin, Filter, Search, Settings, LogOut, MessageSquare, FileText, DollarSign, Calendar, Eye, CreditCard as Edit, Trash2, Plus, Send, UserCheck, Building } from 'lucide-react-native';
 import { 
   getIssues, 
   getTenders, 
