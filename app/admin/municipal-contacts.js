@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
-import { Plus, Edit, Trash2, Phone, Mail, MapPin, Clock, Save, X } from 'lucide-react-native';
+import { Plus, CreditCard as Edit, Trash2, Phone, Mail, MapPin, Clock, Save, X } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 
 export default function MunicipalContactsManagement() {
@@ -464,6 +464,7 @@ export default function MunicipalContactsManagement() {
                       formData.is_active && styles.checkboxBoxActive
                     ]}>
                       {formData.is_active && <Text style={styles.checkboxCheck}>✓</Text>}
+                      }
                     </View>
                     <Text style={styles.checkboxLabel}>Active (visible to public)</Text>
                   </TouchableOpacity>
@@ -477,6 +478,7 @@ export default function MunicipalContactsManagement() {
                       formData.is_featured && styles.checkboxBoxActive
                     ]}>
                       {formData.is_featured && <Text style={styles.checkboxCheck}>✓</Text>}
+                      }
                     </View>
                     <Text style={styles.checkboxLabel}>Featured (highlighted in app)</Text>
                   </TouchableOpacity>

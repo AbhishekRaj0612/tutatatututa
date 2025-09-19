@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
-import { BarChart3, TrendingUp, MapPin, Calendar, Users, AlertTriangle, CheckCircle, Clock } from 'lucide-react-native';
+import { ChartBar as BarChart3, TrendingUp, MapPin, Calendar, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock } from 'lucide-react-native';
 import { getAdminDashboardStats, getIssuesWithLocation } from '../../lib/supabase';
 
 const { width } = Dimensions.get('window');
