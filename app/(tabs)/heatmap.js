@@ -1,9 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert } from 'react-native';
 import { Filter, MapPin, TrendingUp, Calendar, ChartBar as BarChart, Layers, Navigation } from 'lucide-react-native';
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
 import { getIssuesWithLocation, getAreas, getWards } from '../../lib/supabase';
-import { useEffect } from 'react';
 
 const { width } = Dimensions.get('window');
 
@@ -25,11 +24,30 @@ export default function HeatmapScreen() {
 
   useEffect(() => {
     loadData();
-  }, [selectedFilter, selectedArea, selectedWard]);
+  }, [selectedFilter, selectedArea, selectedWard, selectedPeriod]);
 
   const loadData = async () => {
     try {
       setLoading(true);
+      
+      // Calculate date filter
+      const now = new Date();
+      let dateFrom = null;
+      
+      switch (selectedPeriod) {
+        case 'week':
+          dateFrom = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          break;
+        case 'month':
+          dateFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+          break;
+        case 'quarter':
+          dateFrom = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+          break;
+        case 'year':
+          dateFrom = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString();
+          break;
+      }
       
       // Load issues with location data
       const filters = {};
@@ -41,6 +59,9 @@ export default function HeatmapScreen() {
       }
       if (selectedWard !== 'all') {
         filters.ward = selectedWard;
+      }
+      if (dateFrom) {
+        filters.dateFrom = dateFrom;
       }
       
       const { data: issuesData, error: issuesError } = await getIssuesWithLocation(filters);
@@ -64,12 +85,14 @@ export default function HeatmapScreen() {
       setLoading(false);
     }
   };
+
   const filters = [
     { id: 'all', label: 'All Issues', color: '#6B7280', count: issues.length },
-    { id: 'roads', label: 'Roads', color: '#EF4444' },
-    { id: 'utilities', label: 'Utilities', color: '#F59E0B' },
-    { id: 'environment', label: 'Environment', color: '#10B981' },
-    { id: 'safety', label: 'Safety', color: '#8B5CF6' },
+    { id: 'roads', label: 'Roads', color: '#EF4444', count: issues.filter(i => i.category === 'roads').length },
+    { id: 'utilities', label: 'Utilities', color: '#F59E0B', count: issues.filter(i => i.category === 'utilities').length },
+    { id: 'environment', label: 'Environment', color: '#10B981', count: issues.filter(i => i.category === 'environment').length },
+    { id: 'safety', label: 'Safety', color: '#8B5CF6', count: issues.filter(i => i.category === 'safety').length },
+    { id: 'parks', label: 'Parks', color: '#06B6D4', count: issues.filter(i => i.category === 'parks').length },
   ];
 
   const periods = [
@@ -105,6 +128,12 @@ export default function HeatmapScreen() {
         issues: group.count,
         type: group.issues[0]?.category || 'other',
         intensity: group.count > 20 ? 'high' : group.count > 10 ? 'medium' : 'low',
+        priority_breakdown: {
+          urgent: group.issues.filter(i => i.priority === 'urgent').length,
+          high: group.issues.filter(i => i.priority === 'high').length,
+          medium: group.issues.filter(i => i.priority === 'medium').length,
+          low: group.issues.filter(i => i.priority === 'low').length,
+        }
       }));
   };
 
@@ -124,9 +153,13 @@ export default function HeatmapScreen() {
       categoryCount[a] > categoryCount[b] ? a : b, 'None'
     );
     
+    // Calculate resolution rate
+    const resolvedCount = issues.filter(i => i.status === 'resolved').length;
+    const resolutionRate = totalIssues > 0 ? Math.round((resolvedCount / totalIssues) * 100) : 0;
+    
     return [
       { label: 'Total Issues', value: totalIssues.toString(), trend: '+12%', color: '#EF4444' },
-      { label: 'Avg Issues/Area', value: avgIssuesPerArea, trend: '-5%', color: '#10B981' },
+      { label: 'Resolution Rate', value: `${resolutionRate}%`, trend: '+5%', color: '#10B981' },
       { label: 'Most Reported', value: mostReported, trend: '42%', color: '#F59E0B' },
       { label: 'Active Areas', value: areas.length.toString(), trend: '+8%', color: '#8B5CF6' },
     ];
@@ -149,6 +182,7 @@ export default function HeatmapScreen() {
       utilities: '#F59E0B',
       environment: '#10B981',
       safety: '#8B5CF6',
+      parks: '#06B6D4',
     };
     return typeColors[type] || '#6B7280';
   };
@@ -160,7 +194,7 @@ export default function HeatmapScreen() {
   const onMarkerPress = (issue) => {
     Alert.alert(
       issue.title,
-      `${issue.description}\n\nStatus: ${issue.status}\nPriority: ${issue.priority}`,
+      `${issue.description}\n\nStatus: ${issue.status}\nPriority: ${issue.priority}\nReported: ${new Date(issue.created_at).toLocaleDateString()}`,
       [
         { text: 'Close', style: 'cancel' },
         { text: 'View Details', onPress: () => console.log('View details:', issue.id) }
@@ -173,7 +207,7 @@ export default function HeatmapScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Issue Heatmap</Text>
-        <Text style={styles.subtitle}>Visualize community issues by location</Text>
+        <Text style={styles.subtitle}>Visualize community issues by location and time</Text>
       </View>
 
       {/* Filters */}
@@ -199,6 +233,9 @@ export default function HeatmapScreen() {
                 >
                   {filter.label}
                 </Text>
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{filter.count}</Text>
+                </View>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -374,7 +411,11 @@ export default function HeatmapScreen() {
                       <View style={styles.calloutMeta}>
                         <Text style={styles.calloutCategory}>{issue.category}</Text>
                         <Text style={styles.calloutStatus}>{issue.status}</Text>
+                        <Text style={styles.calloutPriority}>{issue.priority}</Text>
                       </View>
+                      <Text style={styles.calloutDate}>
+                        {new Date(issue.created_at).toLocaleDateString()}
+                      </Text>
                     </View>
                   </Callout>
                 </Marker>
@@ -389,6 +430,7 @@ export default function HeatmapScreen() {
                 <View key={filter.id} style={styles.legendItem}>
                   <View style={[styles.legendColor, { backgroundColor: filter.color }]} />
                   <Text style={styles.legendText}>{filter.label}</Text>
+                  <Text style={styles.legendCount}>({filter.count})</Text>
                 </View>
               ))}
             </View>
@@ -433,6 +475,33 @@ export default function HeatmapScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Priority Breakdown */}
+              <View style={styles.priorityBreakdown}>
+                <Text style={styles.priorityTitle}>Priority Breakdown:</Text>
+                <View style={styles.priorityItems}>
+                  {hotspot.priority_breakdown.urgent > 0 && (
+                    <Text style={[styles.priorityItem, { color: '#DC2626' }]}>
+                      Urgent: {hotspot.priority_breakdown.urgent}
+                    </Text>
+                  )}
+                  {hotspot.priority_breakdown.high > 0 && (
+                    <Text style={[styles.priorityItem, { color: '#EF4444' }]}>
+                      High: {hotspot.priority_breakdown.high}
+                    </Text>
+                  )}
+                  {hotspot.priority_breakdown.medium > 0 && (
+                    <Text style={[styles.priorityItem, { color: '#F59E0B' }]}>
+                      Medium: {hotspot.priority_breakdown.medium}
+                    </Text>
+                  )}
+                  {hotspot.priority_breakdown.low > 0 && (
+                    <Text style={[styles.priorityItem, { color: '#10B981' }]}>
+                      Low: {hotspot.priority_breakdown.low}
+                    </Text>
+                  )}
+                </View>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
@@ -445,22 +514,24 @@ export default function HeatmapScreen() {
           <View style={styles.insightCard}>
             <TrendingUp size={24} color="#10B981" />
             <View style={styles.insightContent}>
-              <Text style={styles.insightTitle}>Issue Resolution Up 15%</Text>
+              <Text style={styles.insightTitle}>Issue Resolution Improving</Text>
               <Text style={styles.insightText}>
-                Response times have improved significantly this month
+                Response times have improved by 15% this {selectedPeriod}
               </Text>
             </View>
           </View>
           
-          <View style={styles.insightCard}>
-            <MapPin size={24} color="#EF4444" />
-            <View style={styles.insightContent}>
-              <Text style={styles.insightTitle}>Downtown Needs Attention</Text>
-              <Text style={styles.insightText}>
-                31% increase in utility-related issues in downtown area
-              </Text>
+          {hotspots.length > 0 && (
+            <View style={styles.insightCard}>
+              <MapPin size={24} color="#EF4444" />
+              <View style={styles.insightContent}>
+                <Text style={styles.insightTitle}>{hotspots[0].location} Needs Attention</Text>
+                <Text style={styles.insightText}>
+                  {hotspots[0].issues} issues reported in this area
+                </Text>
+              </View>
             </View>
-          </View>
+          )}
           
           <View style={styles.insightCard}>
             <Calendar size={24} color="#8B5CF6" />
@@ -517,6 +588,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderWidth: 1,
@@ -524,6 +597,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     backgroundColor: '#FFFFFF',
     borderColor: '#E5E7EB',
+    gap: 6,
   },
   filterButtonActive: {
     backgroundColor: '#F0F9FF',
@@ -532,6 +606,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#6B7280',
+  },
+  filterBadge: {
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 16,
+    alignItems: 'center',
+  },
+  filterBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#374151',
   },
   periodSection: {
     paddingHorizontal: 20,
@@ -653,6 +740,7 @@ const styles = StyleSheet.create({
   calloutMeta: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 4,
   },
   calloutCategory: {
     fontSize: 10,
@@ -666,6 +754,16 @@ const styles = StyleSheet.create({
     color: '#10B981',
     textTransform: 'capitalize',
   },
+  calloutPriority: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#EF4444',
+    textTransform: 'capitalize',
+  },
+  calloutDate: {
+    fontSize: 10,
+    color: '#9CA3AF',
+  },
   legend: {
     backgroundColor: '#F9FAFB',
     padding: 16,
@@ -678,14 +776,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   legendItems: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   legendColor: {
     width: 12,
@@ -695,6 +791,12 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     color: '#6B7280',
+    flex: 1,
+  },
+  legendCount: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    fontWeight: '500',
   },
   hotspotsSection: {
     padding: 20,
@@ -741,6 +843,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
   hotspotIssues: {
     fontSize: 12,
@@ -755,6 +858,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     textTransform: 'capitalize',
+  },
+  priorityBreakdown: {
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 8,
+  },
+  priorityTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  priorityItems: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  priorityItem: {
+    fontSize: 10,
+    fontWeight: '500',
   },
   insightsSection: {
     padding: 20,

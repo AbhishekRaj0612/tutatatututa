@@ -2,16 +2,16 @@ import 'dotenv/config';
 
 export default {
     expo: {
-        name: "bolt-expo-nativewind",
-        slug: "bolt-expo-nativewind",
+        name: "जनConnect",
+        slug: "जनConnect",
         version: "1.0.0",
         orientation: "portrait",
-        icon: "./assets/images/icon.png",
+        icon: "./assets/images/favicon.png",
         scheme: "myapp",
         userInterfaceStyle: "automatic",
         newArchEnabled: true,
-        ios: { supportsTablet: true, bundleIdentifier: "com.yourcompany.boltexpo" },
-        android: { package: "com.yourcompany.boltexpo", versionCode: 1 },
+        ios: { supportsTablet: true, bundleIdentifier: "com.जनConnect.expo" },
+        android: { package: "com.जनConnect.expo", versionCode: 1 },
         web: { bundler: "metro", output: "single", favicon: "./assets/images/favicon.png" },
         plugins: ["expo-router", "expo-font", "expo-web-browser", "expo-localization"],
         experiments: { typedRoutes: true },

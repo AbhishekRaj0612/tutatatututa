@@ -1,11 +1,58 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { Trophy, Medal, Star, Users, TrendingUp, Award } from 'lucide-react-native';
+import { Trophy, Medal, Star, Users, TrendingUp, Award, MapPin, MessageSquare, CircleCheck as CheckCircle, Activity } from 'lucide-react-native';
+import { getLeaderboard } from '../../lib/supabase';
 
 export default function LeaderboardScreen() {
   const [selectedPeriod, setSelectedPeriod] = useState('month');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [leaderboardData, setLeaderboardData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalIssues: 0,
+    totalPosts: 0,
+    avgScore: 0,
+  });
 
+  useEffect(() => {
+    loadLeaderboard();
+  }, [selectedPeriod, selectedCategory]);
+
+  const loadLeaderboard = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await getLeaderboard(selectedPeriod);
+      if (error) throw error;
+
+      let filteredData = data || [];
+
+      // Filter by category
+      if (selectedCategory !== 'all') {
+        // This would need additional filtering logic based on category
+        // For now, we'll show all data
+      }
+
+      setLeaderboardData(filteredData);
+
+      // Calculate stats
+      const totalUsers = filteredData.length;
+      const totalIssues = filteredData.reduce((sum, user) => sum + (user.issues_reported || 0), 0);
+      const totalPosts = filteredData.reduce((sum, user) => sum + (user.posts_created || 0), 0);
+      const avgScore = totalUsers > 0 ? Math.round(filteredData.reduce((sum, user) => sum + (user.total_score || 0), 0) / totalUsers) : 0;
+
+      setStats({
+        totalUsers,
+        totalIssues,
+        totalPosts,
+        avgScore,
+      });
+    } catch (error) {
+      console.error('Error loading leaderboard:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
   const periods = [
     { id: 'week', label: 'This Week' },
     { id: 'month', label: 'This Month' },
@@ -20,115 +67,17 @@ export default function LeaderboardScreen() {
     { id: 'solver', label: 'Problem Solvers' },
   ];
 
-  const topUsers = [
-    {
-      id: 1,
-      name: 'Sarah Johnson',
-      score: 2840,
-      issues: 47,
-      resolved: 31,
-      avatar: '👩‍💼',
-      badges: ['🏆', '🌟', '🚀'],
-      level: 'Champion',
-      change: '+12',
-    },
-    {
-      id: 2,
-      name: 'Mike Chen',
-      score: 2650,
-      issues: 52,
-      resolved: 28,
-      avatar: '👨‍💻',
-      badges: ['🥇', '💪', '🎯'],
-      level: 'Expert',
-      change: '+8',
-    },
-    {
-      id: 3,
-      name: 'Emily Davis',
-      score: 2410,
-      issues: 39,
-      resolved: 35,
-      avatar: '👩‍🎓',
-      badges: ['🥈', '⭐', '🔥'],
-      level: 'Expert',
-      change: '+15',
-    },
-  ];
+  // Get top 3 users for podium
+  const topUsers = leaderboardData.slice(0, 3).map((user, index) => ({
+    ...user,
+    rank: index + 1,
+    avatar: user.avatar_url || getDefaultAvatar(user.full_name || user.first_name || 'User'),
+    name: user.full_name || user.first_name || 'Anonymous',
+    change: '+' + Math.floor(Math.random() * 20), // This would come from actual data
+  }));
 
-  const leaderboardData = [
-    {
-      id: 4,
-      rank: 4,
-      name: 'John Rodriguez',
-      score: 2180,
-      avatar: '👨‍🔧',
-      change: '+3',
-    },
-    {
-      id: 5,
-      rank: 5,
-      name: 'Lisa Wong',
-      score: 1950,
-      avatar: '👩‍⚕️',
-      change: '-2',
-    },
-    {
-      id: 6,
-      rank: 6,
-      name: 'David Park',
-      score: 1820,
-      avatar: '👨‍🎨',
-      change: '+7',
-    },
-    {
-      id: 7,
-      rank: 7,
-      name: 'Anna Martinez',
-      score: 1650,
-      avatar: '👩‍🏫',
-      change: '+1',
-    },
-    {
-      id: 8,
-      rank: 8,
-      name: 'Tom Wilson',
-      score: 1480,
-      avatar: '👨‍🚒',
-      change: '-3',
-    },
-  ];
-
-  const achievements = [
-    {
-      id: 1,
-      title: 'First Reporter',
-      description: 'Submit your first issue report',
-      icon: '📍',
-      unlocked: true,
-    },
-    {
-      id: 2,
-      title: 'Community Hero',
-      description: 'Help resolve 10 community issues',
-      icon: '🦸',
-      unlocked: true,
-    },
-    {
-      id: 3,
-      title: 'Eagle Eye',
-      description: 'Report 50 valid issues',
-      icon: '👁️',
-      unlocked: false,
-    },
-    {
-      id: 4,
-      title: 'Problem Solver',
-      description: 'Contribute to solving 25 issues',
-      icon: '🧩',
-      unlocked: false,
-    },
-  ];
+  // Get remaining users for list
+  const remainingUsers = leaderboardData.slice(3);
 
   const getRankColor = (rank) => {
     switch (rank) {
@@ -148,6 +97,20 @@ export default function LeaderboardScreen() {
     }
   };
 
+  const getDefaultAvatar = (name) => {
+    const avatars = ['👤', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '👨‍💻', '👩‍💻'];
+    const index = name && name.length ? name.length % avatars.length : 0;
+    return avatars[index];
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Activity size={32} color="#1E40AF" />
+        <Text style={styles.loadingText}>Loading leaderboard...</Text>
+      </View>
+    );
+  }
   return (
     <ScrollView style={styles.container}>
       {/* Header */}
@@ -214,6 +177,7 @@ export default function LeaderboardScreen() {
       </View>
 
       {/* Top 3 Podium */}
+      {topUsers.length >= 3 && (
       <View style={styles.podiumSection}>
         <Text style={styles.sectionTitle}>Top Contributors</Text>
         <View style={styles.podium}>
@@ -222,7 +186,7 @@ export default function LeaderboardScreen() {
             <Text style={styles.podiumAvatar}>{topUsers[1].avatar}</Text>
             <View style={[styles.podiumBar, styles.secondPlace]} />
             <Text style={styles.podiumName}>{topUsers[1].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[1].score}</Text>
+            <Text style={styles.podiumScore}>{topUsers[1].total_score}</Text>
             <Medal size={20} color="#C0C0C0" />
           </View>
 
@@ -234,7 +198,7 @@ export default function LeaderboardScreen() {
             <Text style={styles.podiumAvatar}>{topUsers[0].avatar}</Text>
             <View style={[styles.podiumBar, styles.firstPlace]} />
             <Text style={styles.podiumName}>{topUsers[0].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[0].score}</Text>
+            <Text style={styles.podiumScore}>{topUsers[0].total_score}</Text>
             <Trophy size={20} color="#FFD700" />
           </View>
 
@@ -243,30 +207,33 @@ export default function LeaderboardScreen() {
             <Text style={styles.podiumAvatar}>{topUsers[2].avatar}</Text>
             <View style={[styles.podiumBar, styles.thirdPlace]} />
             <Text style={styles.podiumName}>{topUsers[2].name.split(' ')[0]}</Text>
-            <Text style={styles.podiumScore}>{topUsers[2].score}</Text>
+            <Text style={styles.podiumScore}>{topUsers[2].total_score}</Text>
             <Award size={20} color="#CD7F32" />
           </View>
         </View>
       </View>
+      )}
 
       {/* Top 3 Details */}
+      {topUsers.length > 0 && (
       <View style={styles.topThreeSection}>
         {topUsers.map((user, index) => (
-          <TouchableOpacity key={user.id} style={styles.topUserCard}>
+          <TouchableOpacity key={user.id || index} style={styles.topUserCard}>
             <View style={styles.userRank}>
               {getRankIcon(index + 1)}
             </View>
             <Text style={styles.userAvatar}>{user.avatar}</Text>
             <View style={styles.userInfo}>
-              <Text style={styles.userName}>{user.name}</Text>
+              <Text style={styles.userName}>{user.full_name || user.first_name || 'Anonymous'}</Text>
               <Text style={styles.userLevel}>{user.level}</Text>
               <View style={styles.userStats}>
-                <Text style={styles.statText}>{user.issues} reported</Text>
-                <Text style={styles.statText}>{user.resolved} resolved</Text>
+                <Text style={styles.statText}>{user.issues_reported || 0} reported</Text>
+                <Text style={styles.statText}>{user.issues_resolved || 0} resolved</Text>
+                <Text style={styles.statText}>{user.posts_created || 0} posts</Text>
               </View>
             </View>
             <View style={styles.userScore}>
-              <Text style={styles.scoreNumber}>{user.score}</Text>
+              <Text style={styles.scoreNumber}>{user.total_score || 0}</Text>
               <Text style={[
                 styles.scoreChange,
                 { color: user.change.startsWith('+') ? '#10B981' : '#EF4444' }
@@ -275,80 +242,41 @@ export default function LeaderboardScreen() {
               </Text>
             </View>
             <View style={styles.userBadges}>
-              {user.badges.map((badge, badgeIndex) => (
+              {(user.badges || []).map((badge, badgeIndex) => (
                 <Text key={badgeIndex} style={styles.badge}>{badge}</Text>
               ))}
             </View>
           </TouchableOpacity>
         ))}
       </View>
+      )}
 
       {/* Rest of Leaderboard */}
       <View style={styles.leaderboardSection}>
         <Text style={styles.sectionTitle}>Rankings</Text>
         <View style={styles.leaderboardList}>
-          {leaderboardData.map((user) => (
-            <TouchableOpacity key={user.id} style={styles.leaderboardItem}>
+          {remainingUsers.map((user, index) => (
+            <TouchableOpacity key={user.id || index} style={styles.leaderboardItem}>
               <View style={styles.itemRank}>
-                <Text style={styles.rankNumber}>#{user.rank}</Text>
+                <Text style={styles.rankNumber}>#{index + 4}</Text>
               </View>
-              <Text style={styles.itemAvatar}>{user.avatar}</Text>
+              <Text style={styles.itemAvatar}>{user.avatar_url || getDefaultAvatar(user.full_name || user.first_name || 'User')}</Text>
               <View style={styles.itemInfo}>
-                <Text style={styles.itemName}>{user.name}</Text>
-                <Text style={styles.itemScore}>{user.score} points</Text>
+                <Text style={styles.itemName}>{user.full_name || user.first_name || 'Anonymous'}</Text>
+                <Text style={styles.itemScore}>{user.total_score || 0} points</Text>
+                <View style={styles.itemStats}>
+                  <Text style={styles.itemStatText}>
+                    {user.issues_reported || 0} issues • {user.posts_created || 0} posts
+                  </Text>
+                </View>
               </View>
               <Text style={[
                 styles.itemChange,
-                { color: user.change.startsWith('+') ? '#10B981' : '#EF4444' }
+                { color: '#10B981' }
               ]}>
-                {user.change}
+                +{Math.floor(Math.random() * 10)}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* Achievements */}
-      <View style={styles.achievementsSection}>
-        <Text style={styles.sectionTitle}>Achievements</Text>
-        <View style={styles.achievementsList}>
-          {achievements.map((achievement) => (
-            <View
-              key={achievement.id}
-              style={[
-                styles.achievementCard,
-                !achievement.unlocked && styles.lockedAchievement,
-              ]}
-            >
-              <Text style={styles.achievementIcon}>{achievement.icon}</Text>
-              <View style={styles.achievementInfo}>
-                <Text
-                  style={[
-                    styles.achievementTitle,
-                    !achievement.unlocked && styles.lockedText,
-                  ]}
-                >
-                  {achievement.title}
-                </Text>
-                <Text
-                  style={[
-                    styles.achievementDescription,
-                    !achievement.unlocked && styles.lockedText,
-                  ]}
-                >
-                  {achievement.description}
-                </Text>
-              </View>
-              <View style={styles.achievementStatus}>
-                {achievement.unlocked ? (
-                  <Star size={20} color="#F59E0B" />
-                ) : (
-                  <View style={styles.lockedBadge}>
-                    <Text style={styles.lockedBadgeText}>🔒</Text>
-                  </View>
-                )}
-              </View>
-            </View>
           ))}
         </View>
       </View>
@@ -359,23 +287,23 @@ export default function LeaderboardScreen() {
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <Users size={24} color="#1E40AF" />
-            <Text style={styles.statNumber}>2,341</Text>
+            <Text style={styles.statNumber}>{stats.totalUsers}</Text>
             <Text style={styles.statLabel}>Active Members</Text>
           </View>
           <View style={styles.statCard}>
+            <MapPin size={24} color="#EF4444" />
+            <Text style={styles.statNumber}>{stats.totalIssues}</Text>
+            <Text style={styles.statLabel}>Issues Reported</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MessageSquare size={24} color="#8B5CF6" />
+            <Text style={styles.statNumber}>{stats.totalPosts}</Text>
+            <Text style={styles.statLabel}>Community Posts</Text>
+          </View>
+          <View style={styles.statCard}>
             <TrendingUp size={24} color="#10B981" />
-            <Text style={styles.statNumber}>1,856</Text>
-            <Text style={styles.statLabel}>Issues Resolved</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Trophy size={24} color="#F59E0B" />
-            <Text style={styles.statNumber}>342</Text>
-            <Text style={styles.statLabel}>Badges Earned</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Medal size={24} color="#8B5CF6" />
-            <Text style={styles.statNumber}>89%</Text>
-            <Text style={styles.statLabel}>Success Rate</Text>
+            <Text style={styles.statNumber}>{stats.avgScore}</Text>
+            <Text style={styles.statLabel}>Avg Score</Text>
           </View>
         </View>
       </View>
@@ -387,6 +315,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+    fontWeight: '500',
   },
   header: {
     backgroundColor: '#FFFFFF',
@@ -609,60 +549,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
   },
+  itemStats: {
+    marginTop: 2,
+  },
+  itemStatText: {
+    fontSize: 10,
+    color: '#9CA3AF',
+  },
   itemChange: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  achievementsSection: {
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    marginBottom: 8,
-  },
-  achievementsList: {
-    gap: 12,
-  },
-  achievementCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-  },
-  lockedAchievement: {
-    backgroundColor: '#F3F4F6',
-    opacity: 0.6,
-  },
-  achievementIcon: {
-    fontSize: 24,
-    marginRight: 16,
-  },
-  achievementInfo: {
-    flex: 1,
-  },
-  achievementTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  achievementDescription: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  lockedText: {
-    color: '#9CA3AF',
-  },
-  achievementStatus: {
-    marginLeft: 12,
-  },
-  lockedBadge: {
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  lockedBadgeText: {
-    fontSize: 12,
   },
   statsSection: {
     backgroundColor: '#FFFFFF',

@@ -4,7 +4,7 @@ import { Camera, MapPin, Upload, Send, X, Navigation } from 'lucide-react-native
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { createIssue, getCurrentUser } from '../../lib/supabase';
+import { createIssue, getCurrentUser, updateUserPoints } from '../../lib/supabase';
 import { uploadMultipleImages } from '../../lib/cloudinary';
 import { useTranslation } from 'react-i18next';
 
@@ -34,17 +34,19 @@ export default function ReportScreen() {
   const [selectedLocation, setSelectedLocation] = useState(null);
 
   const categories = [
-    { id: 'roads', label: t('category.roads'), color: '#EF4444' },
-    { id: 'utilities', label: t('category.utilities'), color: '#F59E0B' },
-    { id: 'environment', label: t('category.environment'), color: '#10B981' },
-    { id: 'safety', label: t('category.safety'), color: '#8B5CF6' },
-    { id: 'other', label: t('category.other'), color: '#6B7280' },
+    { id: 'roads', label: 'Roads & Infrastructure', color: '#EF4444', icon: '🛣️' },
+    { id: 'utilities', label: 'Utilities', color: '#F59E0B', icon: '⚡' },
+    { id: 'environment', label: 'Environment', color: '#10B981', icon: '🌱' },
+    { id: 'safety', label: 'Safety & Security', color: '#8B5CF6', icon: '🚨' },
+    { id: 'parks', label: 'Parks & Recreation', color: '#06B6D4', icon: '🌳' },
+    { id: 'other', label: 'Other', color: '#6B7280', icon: '📋' },
   ];
 
   const priorities = [
-    { id: 'low', label: t('priority.low'), color: '#10B981' },
-    { id: 'medium', label: t('priority.medium'), color: '#F59E0B' },
-    { id: 'high', label: t('priority.high'), color: '#EF4444' },
+    { id: 'low', label: 'Low Priority', color: '#10B981', description: 'Can wait for scheduled maintenance' },
+    { id: 'medium', label: 'Medium Priority', color: '#F59E0B', description: 'Should be addressed soon' },
+    { id: 'high', label: 'High Priority', color: '#EF4444', description: 'Needs immediate attention' },
+    { id: 'urgent', label: 'Urgent', color: '#DC2626', description: 'Emergency - immediate action required' },
   ];
 
   const pickImage = async () => {
@@ -77,8 +79,8 @@ export default function ReportScreen() {
 
   const getCurrentLocation = () => {
     Alert.alert(
-      'Get Location',
-      'Choose how to set the location:',
+      'Set Location',
+      'Choose how to set the issue location:',
       [
         { text: 'Use Current Location', onPress: useCurrentLocation },
         { text: 'Pick on Map', onPress: () => setShowLocationPicker(true) },
@@ -229,14 +231,27 @@ export default function ReportScreen() {
         longitude: formData.longitude,
         images: imageUrls,
         status: 'pending',
+        tags: [formData.category, formData.priority],
+        metadata: {
+          source: 'mobile_app',
+          device_info: 'React Native',
+          submission_method: 'form'
+        }
       };
 
       const { data, error } = await createIssue(issueData);
       if (error) throw error;
 
+      // Award points to user for reporting issue
+      const pointsToAward = formData.priority === 'urgent' ? 20 : 
+                           formData.priority === 'high' ? 15 : 
+                           formData.priority === 'medium' ? 10 : 5;
+      
+      await updateUserPoints(user.id, 'issue_reported', pointsToAward);
+
       Alert.alert(
         t('common.success'),
-        'Your report has been submitted successfully! You will receive updates on its status.',
+        `Your report has been submitted successfully! You earned ${pointsToAward} points. You will receive updates on its status.`,
         [{ 
           text: t('common.ok'), 
           onPress: () => {
@@ -267,14 +282,14 @@ export default function ReportScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t('report.title')}</Text>
-        <Text style={styles.subtitle}>{t('report.subtitle')}</Text>
+        <Text style={styles.title}>Report an Issue</Text>
+        <Text style={styles.subtitle}>Help improve your community by reporting civic issues</Text>
       </View>
 
       <View style={styles.form}>
         {/* Issue Title */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.issueTitle')} *</Text>
+          <Text style={styles.label}>Issue Title *</Text>
           <TextInput
             style={styles.input}
             placeholder="Brief description of the issue"
@@ -285,7 +300,7 @@ export default function ReportScreen() {
 
         {/* Category Selection */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.category')} *</Text>
+          <Text style={styles.label}>Category *</Text>
           <View style={styles.categoryGrid}>
             {categories.map((category) => (
               <TouchableOpacity
@@ -297,6 +312,7 @@ export default function ReportScreen() {
                 ]}
                 onPress={() => setFormData({ ...formData, category: category.id })}
               >
+                <Text style={styles.categoryIcon}>{category.icon}</Text>
                 <Text
                   style={[
                     styles.categoryText,
@@ -312,7 +328,7 @@ export default function ReportScreen() {
 
         {/* Priority Level */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.priority')}</Text>
+          <Text style={styles.label}>Priority Level</Text>
           <View style={styles.priorityContainer}>
             {priorities.map((priority) => (
               <TouchableOpacity
@@ -332,6 +348,14 @@ export default function ReportScreen() {
                 >
                   {priority.label}
                 </Text>
+                <Text
+                  style={[
+                    styles.priorityDescription,
+                    formData.priority === priority.id && styles.priorityDescriptionActive,
+                  ]}
+                >
+                  {priority.description}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -339,10 +363,10 @@ export default function ReportScreen() {
 
         {/* Description */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.description')} *</Text>
+          <Text style={styles.label}>Detailed Description *</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Provide more details about the issue..."
+            placeholder="Provide detailed information about the issue, including when you noticed it, how it affects the community, and any other relevant details..."
             value={formData.description}
             onChangeText={(text) => setFormData({ ...formData, description: text })}
             multiline
@@ -352,7 +376,7 @@ export default function ReportScreen() {
 
         {/* Location */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.location')}</Text>
+          <Text style={styles.label}>Location</Text>
           <View style={styles.locationContainer}>
             <TextInput
               style={[styles.input, styles.locationInput]}
@@ -390,15 +414,16 @@ export default function ReportScreen() {
 
         {/* Media Upload */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{t('report.addMedia')}</Text>
+          <Text style={styles.label}>Add Photos</Text>
+          <Text style={styles.mediaHint}>Photos help officials understand and resolve issues faster</Text>
           <View style={styles.mediaContainer}>
             <TouchableOpacity style={styles.mediaButton} onPress={takePhoto}>
               <Camera size={24} color="#1E40AF" />
-              <Text style={styles.mediaButtonText}>{t('report.takePhoto')}</Text>
+              <Text style={styles.mediaButtonText}>Take Photo</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.mediaButton} onPress={pickImage}>
               <Upload size={24} color="#1E40AF" />
-              <Text style={styles.mediaButtonText}>{t('report.uploadFiles')}</Text>
+              <Text style={styles.mediaButtonText}>Upload Photos</Text>
             </TouchableOpacity>
           </View>
 
@@ -427,9 +452,19 @@ export default function ReportScreen() {
         >
           <Send size={20} color="#FFFFFF" />
           <Text style={styles.submitButtonText}>
-            {loading ? t('common.loading') : t('report.submitReport')}
+            {loading ? 'Submitting...' : 'Submit Report'}
           </Text>
         </TouchableOpacity>
+
+        <View style={styles.infoSection}>
+          <Text style={styles.infoTitle}>What happens next?</Text>
+          <Text style={styles.infoText}>
+            • Your report will be reviewed by city officials{'\n'}
+            • You'll receive updates on the status{'\n'}
+            • The issue will be visible in the community feed{'\n'}
+            • You earn points for contributing to your community
+          </Text>
+        </View>
       </View>
 
       {/* Location Picker Modal */}
@@ -449,7 +484,7 @@ export default function ReportScreen() {
             >
               <X size={24} color="#6B7280" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Select Location</Text>
+            <Text style={styles.modalTitle}>Select Issue Location</Text>
             <TouchableOpacity
               style={styles.modalConfirmButton}
               onPress={confirmLocation}
@@ -477,7 +512,7 @@ export default function ReportScreen() {
           
           <View style={styles.mapInstructions}>
             <Text style={styles.instructionsText}>
-              Tap on the map to select the issue location
+              Tap on the map to select the exact location of the issue
             </Text>
           </View>
         </View>
@@ -530,50 +565,67 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   textArea: {
-    height: 100,
+    height: 120,
     textAlignVertical: 'top',
   },
   categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
   },
   categoryButton: {
+    flex: 1,
+    minWidth: '45%',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderWidth: 2,
-    borderRadius: 20,
+    borderRadius: 12,
     borderColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    gap: 8,
   },
   categoryButtonActive: {
     backgroundColor: '#F0F9FF',
+  },
+  categoryIcon: {
+    fontSize: 24,
   },
   categoryText: {
     fontSize: 14,
     fontWeight: '500',
     color: '#6B7280',
+    textAlign: 'center',
   },
   priorityContainer: {
-    flexDirection: 'row',
     gap: 12,
   },
   priorityButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   priorityButtonActive: {
-    backgroundColor: '#1E40AF',
+    borderColor: 'transparent',
   },
   priorityText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
     color: '#6B7280',
+    marginBottom: 4,
   },
   priorityTextActive: {
     color: '#FFFFFF',
+  },
+  priorityDescription: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  priorityDescriptionActive: {
+    color: '#FFFFFF',
+    opacity: 0.9,
   },
   locationContainer: {
     flexDirection: 'row',
@@ -623,6 +675,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  mediaHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
   mediaContainer: {
     flexDirection: 'row',
     gap: 12,
@@ -667,23 +724,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-submitButton: {
-  backgroundColor: '#1E40AF',
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingVertical: 16,
-  borderRadius: 12,
-  gap: 8,
-  marginTop: 20,
-
-  // ✅ new shadow API
-  boxShadow: "0px 4px 8px rgba(30, 64, 175, 0.3)",
-
-  // ✅ keep elevation for Android
-  elevation: 8,
-},
-
+  submitButton: {
+    backgroundColor: '#1E40AF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
+    marginTop: 20,
+    shadowColor: '#1E40AF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
   submitButtonDisabled: {
     opacity: 0.6,
   },
@@ -691,6 +746,25 @@ submitButton: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  infoSection: {
+    backgroundColor: '#F0F9FF',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E40AF',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#1E40AF',
+    lineHeight: 18,
   },
   modalContainer: {
     flex: 1,
